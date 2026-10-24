@@ -51,7 +51,7 @@ pass/fail. **Accents** picks which role paints the deck's accents.
 |![](docs/slide-types/image.png)<br>**Image** | ![](docs/slide-types/labels.png)<br>**Labels** | ![](docs/slide-types/metrics.png)<br>**Metrics** | ![](docs/slide-types/section.png)<br>**Section** |
 |![](docs/slide-types/split.png)<br>**Split** | ![](docs/slide-types/table.png)<br>**Table** | ![](docs/slide-types/timeline.png)<br>**Timeline** |
 
-Every step can also set focus, highlight, hidden parts, per-part colours, an exploded view, a section cut (X/Y/Z), a camera view and speaker notes. Press `N` in the exported file to show the notes.
+Every step can also set focus, highlight, hidden parts, per-part colours, an exploded view, a section cut (X/Y/Z), a model rotation (a tall part reads better lying down), a camera view and speaker notes. Press `N` in the exported file to show the notes.
 
 Only the current step's slide is shown; **Deck settings → Ghost other slides** brings back the faint floating ones. **Layout → Depth** puts a slide behind the model instead of in front of it. **Model only** (`M`) hides the slides altogether, and stays on as you step through.
 

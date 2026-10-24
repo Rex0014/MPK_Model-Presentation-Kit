@@ -9954,6 +9954,10 @@ const pad = x => String(x).padStart(2, '0');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const CORNERS = '<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>';
 const D2R = Math.PI / 180;
+// A step's model rotation, in degrees: [x, y, z] or { x, y, z }.
+const rotOf = r => { const o = Array.isArray(r) ? { x: r[0], y: r[1], z: r[2] } : r || {}; return [o.x, o.y, o.z].map(d => (+d || 0) * D2R); };
+// Embedded assets arrive base64-encoded (one <script data-asset> per file) and are decoded on first use.
+const b64ToBuf = b64 => { const bin = atob(String(b64).trim()), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8.buffer; };
 /* Slide supersampling. A CSS3D element is rasterised at its own CSS size and
    then stretched by the 3D transform, so a slide that lands wider on screen
    than it is in CSS goes soft. `zoom` is a layout-level scale — text re-lays
@@ -10292,6 +10296,9 @@ class DeckEngine {
     this.clip = new T.Plane(new T.Vector3(-1, 0, 0), 1e6);
     this.cut = { axis: 'x', flip: false, cur: 1e6, target: 1e6 };
     this.explode = { cur: 0, target: 0, last: 0 };
+    // Model orientation per step, eased in tick(); `measured` is the angle set the mesh boxes were taken at.
+    this.rot = { cur: [0, 0, 0], target: [0, 0, 0] };
+    this.measured = null;
     this.model = new T.Group(); scene.add(this.model);
 
     this.applyConfig(this.opts.config, true);
@@ -10495,7 +10502,7 @@ class DeckEngine {
     const cam = this.camera, tanH = Math.tan(cam.fov * D2R / 2), aspect = cam.aspect || 1.6, up = new T.Vector3(0, 1, 0);
     const H = this.host.clientHeight || 450;
     for (const sl of this.slides) {
-      const s = sl.cfg; sl.view = this.viewFor(s);
+      const s = sl.cfg; this.measureFor(s.rotate); sl.view = this.viewFor(s);
       const { pos, target, sx, sy } = sl.view, t = TYPES[sl.type], side = this.sideOf(s), ex = +s.explode || 0;
       const f = target.clone().sub(pos); const D = f.length() || 1; f.normalize();
       const r = f.clone().cross(up); if (r.lengthSq() < 1e-6) r.set(1, 0, 0); r.normalize();
@@ -10540,6 +10547,9 @@ class DeckEngine {
       offX -= sx * visW; offY -= sy * visH; // cancel the projection shift so the slide stays put on screen
       place(sl.parts[0].obj, pos.clone().addScaledVector(f, ds).addScaledVector(r, offX).addScaledVector(u, offY), hW * ratio, t.w, sl.parts[0].wrap, ds);
     }
+    // back to the step on screen, not to whichever slide the loop ended on
+    const cur = this.slides[this.state.current];
+    this.measureFor(cur && cur.cfg.rotate);
     const box = new T.Box3();
     if (this.modelBox && !this.modelBox.isEmpty()) box.copy(this.modelBox); else box.setFromCenterAndSize(new T.Vector3(), new T.Vector3(6, 4, 6));
     this.slides.forEach(sl => { if (sl.type !== 'labels') sl.parts.forEach(p => box.expandByPoint(p.obj.position)); });
@@ -10585,6 +10595,7 @@ class DeckEngine {
     const c = sl.cfg;
     this.highlight = Array.isArray(c.highlight) ? c.highlight : toList(c.focus);
     this.hidden = toList(c.hide);
+    this.setRotation(c.rotate);
     this.applyColors(c.colors);
     this.setCut(c.cut);
     this.setExplode(+c.explode || 0);
@@ -10622,6 +10633,40 @@ class DeckEngine {
   setExplode(x) {
     if (x > 0 && this.explode.cur < 1e-3 && this.spin) this.localDirs();
     this.explode.target = x;
+  }
+  // Lay the model over for this step. tick() eases toward the angles, but the boxes are
+  // measured at the target, so framing, labels and the cut plane aim where the model lands.
+  setRotation(r) {
+    this.rot.target = rotOf(r);
+    this.measureFor(r);
+  }
+  measureFor(r) {
+    const a = rotOf(r);
+    if (this.measured && a.every((v, i) => v === this.measured[i])) return;
+    this.measure(a);
+  }
+  /* Mesh boxes, model box and explode directions, taken with the model at `at` and with the
+     explode offsets undone, since partBox() adds the offset itself. Directions come out in
+     each mesh's local frame, so they stay right as the model turns. */
+  measure(at) {
+    const meshes = this.meshes || [], model = this.model;
+    if (!model) return;
+    const keep = model.rotation.clone();
+    for (const o of meshes) if (o.basePos) o.m.position.copy(o.basePos);
+    if (at) model.rotation.set(at[0], at[1], at[2]);
+    model.updateMatrixWorld(true);
+    const mbox = new T.Box3();
+    for (const o of meshes) { o.box = new T.Box3().setFromObject(o.m, true); mbox.union(o.box); }
+    this.modelBox = mbox;
+    // Explode directions: each part (or each unassigned mesh) moves away from the model centre.
+    const mc = mbox.isEmpty() ? new T.Vector3() : mbox.getCenter(new T.Vector3()), groups = new Map();
+    meshes.forEach((o, i) => { const key = o.part || '#' + i; if (!groups.has(key)) groups.set(key, new T.Box3()); groups.get(key).union(o.box); });
+    for (const [key, b] of groups) groups.set(key, b.getCenter(new T.Vector3()).sub(mc));
+    meshes.forEach((o, i) => { o.wdir = groups.get(o.part || '#' + i); });
+    this.localDirs();
+    this.measured = at ? at.slice() : [keep.x, keep.y, keep.z];
+    model.rotation.copy(keep); model.updateMatrixWorld(true);
+    this.explode.last = -1;   // positions were reset above: let tick() re-apply the offsets
   }
   showOverview(instant) {
     this.highlight = []; this.hidden = [];
@@ -10689,6 +10734,12 @@ class DeckEngine {
     } else ctl.update();
 
     const k = 1 - Math.exp(-dt * 6), k2 = 1 - Math.exp(-dt * 3.5);
+    // model rotation
+    const rt = this.rot;
+    if (rt.cur.some((v, i) => v !== rt.target[i])) {
+      for (let i = 0; i < 3; i++) { const d = rt.target[i] - rt.cur[i]; rt.cur[i] = Math.abs(d) < 1e-4 ? rt.target[i] : rt.cur[i] + d * k2; }
+      this.model.rotation.set(rt.cur[0], rt.cur[1], rt.cur[2]);
+    }
     // explode
     const ex = this.explode;
     ex.cur += (ex.target - ex.cur) * k2; if (Math.abs(ex.target - ex.cur) < 1e-4) ex.cur = ex.target;
@@ -10751,24 +10802,16 @@ class DeckEngine {
   swapIn(model, meshes, info) {
     if (this.model) { this.scene.remove(this.model); this.model.traverse(o => { o.geometry && o.geometry.dispose(); if (o.material) toList(o.material).forEach(mt => mt.dispose()); }); }
     this.model = model; this.meshes = meshes; this.scene.add(model);
-    model.updateMatrixWorld(true);
-    const mbox = new T.Box3();
+    model.rotation.set(0, 0, 0);
+    this.rot = { cur: [0, 0, 0], target: [0, 0, 0] }; this.measured = null;
     let tris = 0;
     for (const o of meshes) {
       o.m.material.clippingPlanes = [this.clip];
       if (o.e) o.e.material.clippingPlanes = [this.clip];
-      o.box = new T.Box3().setFromObject(o.m, true);
-      mbox.union(o.box);
       o.basePos = o.m.position.clone();
       tris += (o.m.geometry.index ? o.m.geometry.index.count : o.m.geometry.attributes.position.count) / 3;
     }
-    this.modelBox = mbox;
-    // Explode directions: each part (or each unassigned mesh) moves away from the model centre.
-    const mc = mbox.isEmpty() ? new T.Vector3() : mbox.getCenter(new T.Vector3()), groups = new Map();
-    meshes.forEach((o, i) => { const key = o.part || '#' + i; if (!groups.has(key)) groups.set(key, new T.Box3()); groups.get(key).union(o.box); });
-    for (const [key, b] of groups) groups.set(key, b.getCenter(new T.Vector3()).sub(mc));
-    meshes.forEach((o, i) => { o.wdir = groups.get(o.part || '#' + i); });
-    this.localDirs();
+    this.measure();
     this.explode.cur = this.explode.last = 0;
     this.cut.cur = this.cut.target = 1e6;
     this.modelInfo = { kind: info.kind, parts: this.parts(), nodes: info.nodes || [], meshes: meshes.length, triangles: Math.round(tris) };
@@ -11638,6 +11681,11 @@ function render3D(s, i) {
     () => ({ p: '', col: '#5980a6' }), '+ Colour', { cols: '1fr auto auto' })));
   // keep rowsEditor's removals in sync
   const origSplice = cRows.splice.bind(cRows); cRows.splice = (...a) => { const r = origSplice(...a); writeColors(); return r; };
+
+  // Model rotation for this step: the model turns, the floor and the camera stay put.
+  const rot = s.rotate || (s.rotate = {});
+  sec.append(row(3, field('Rotate X °', num(rot, 'x', { step: 5, ph: '0' })), field('Rotate Y °', num(rot, 'y', { step: 5, ph: '0' })), field('Rotate Z °', num(rot, 'z', { step: 5, ph: '0' }))),
+    hint('Turns the model for this step; the floor and the camera stay put. A tall part reads better lying down: try Z 90.'));
 
   // Explode & cut
   sec.append(range('Explode', +s.explode || 0, 0, 2, 0.05, x => x ? x.toFixed(2) + '×' : 'off', x => { setOrDel(s, 'explode', x || null); changed(); }));
