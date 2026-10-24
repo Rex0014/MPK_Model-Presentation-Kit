@@ -1,0 +1,6 @@
+# Build output — `python3 source/build.py` regenerates it.
+source/dist/
+
+__pycache__/
+*.pyc
+.DS_Store

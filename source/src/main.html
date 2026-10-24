@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck Builder</title>
+<style id="rt-css">/*@RT_CSS@*/</style>
+<style id="ed-css">/*@ED_CSS@*/</style>
+</head>
+<body class="ed">
+<template id="rt-hud">/*@RT_HUD@*/</template>
+<div id="app">
+  <header class="ed-top">
+    <div class="ed-brand">Deck Builder</div>
+    <div class="ed-doc"><span id="doc-name">Untitled</span><span id="doc-dirty" class="ed-dirty" hidden>Unsaved changes</span></div>
+    <div class="ed-actions">
+      <button class="btn btn-secondary" id="btn-new">New</button>
+      <button class="btn btn-secondary" id="btn-open" title="Open an exported deck (.html) or a presentation.js / .json config">Open…</button>
+      <span class="ed-sep"></span>
+      <button class="btn btn-secondary btn-icon" id="btn-undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+      <button class="btn btn-secondary btn-icon" id="btn-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+      <span class="ed-sep"></span>
+      <button class="btn btn-secondary btn-icon" id="btn-theme" title="Editor theme" aria-label="Editor light / dark"></button>
+      <span class="ed-sep"></span>
+      <button class="btn btn-secondary" id="btn-present" title="Present full screen (Ctrl+Enter)">Present</button>
+      <button class="btn btn-primary" id="btn-export" title="Save as one standalone .html file (Ctrl+S)">Export HTML</button>
+    </div>
+  </header>
+  <main class="ed-main">
+    <aside class="ed-steps" id="steps-pane"></aside>
+    <section class="ed-view">
+      <div class="ed-viewbar">
+        <button class="btn btn-primary" id="btn-capture" title="Write the current camera position into this step (V)">Use this view</button>
+        <button class="btn btn-secondary" id="btn-reset" title="Fly back to the step's saved view (R)">Reset view</button>
+        <button class="btn btn-secondary" id="btn-bare" title="Hide the slides and look at the model (M)">Model only</button>
+        <button class="btn btn-secondary" id="btn-overview" title="Show all steps (O)">Overview</button>
+        <span class="ed-notice" id="view-notice"></span>
+        <label class="ed-aspect">Frame
+          <select class="input" id="aspect"><option value="16:9">16:9</option><option value="16:10">16:10</option><option value="4:3">4:3</option><option value="fill">Fill</option></select>
+        </label>
+      </div>
+      <div class="ed-frame" id="frame"><div class="ed-stage" id="stage"></div></div>
+      <div class="ed-presentbar"><span id="present-count"></span><span>← → step · M model only · O overview · Esc exit</span></div>
+    </section>
+    <aside class="ed-insp" id="insp"></aside>
+  </main>
+</div>
+<div class="ed-toasts" id="toasts"></div>
+<input type="file" id="file-open" accept=".html,.htm,.json,.js" hidden>
+<input type="file" id="file-model" accept=".stl,.glb,.gltf" multiple hidden>
+<input type="file" id="file-image" accept="image/*" hidden>
+<script id="rt-three">/*@RT_THREE@*/</script>
+<script id="rt-draco">/*@RT_DRACO@*/</script>
+<script id="rt-engine">/*@RT_ENGINE@*/</script>
+<script type="text/plain" id="rt-player">/*@RT_PLAYER@*/</script>
+<script id="ed-samples">/*@ED_SAMPLES@*/</script>
+<script id="ed-main">/*@ED_MAIN@*/</script>
+</body>
+</html>
