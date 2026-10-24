@@ -62,7 +62,7 @@ node test-theme.js        # the one self-check: the colour ramps
   "steps": [
     { "type": "card", "title": "…", "body": "<p>HTML</p>",
       "focus": ["input"], "highlight": [], "hide": [], "colors": {},
-      "explode": 0, "cut": { "axis": "x", "at": 50 },
+      "explode": 0, "cut": { "axis": "x", "at": 50 }, "rotate": { "z": 90 },
       "view": { "azimuth": -32, "elevation": 16, "distance": 15 },
       "side": "right", "behind": false, "accent": "warning", "notes": "…" }
   ]
@@ -117,6 +117,7 @@ them each frame rather than snapping:
 | `colors` | per-part colour, `"*"` for all, `"original"` to restore |
 | `explode` | each part moves along the vector from the model centre to its own centre |
 | `cut` | one `THREE.Plane` shared by every material, animated to its position |
+| `rotate` | degrees about x/y/z: the model turns for this step while the floor and camera stay put. Mesh boxes are re-measured at the target angles, so focus framing, label anchors and the cut plane follow it |
 
 A **part** is just a name. `model.parts` maps a part name to substrings matched
 case-insensitively against node names; one STL per file gets a part name from

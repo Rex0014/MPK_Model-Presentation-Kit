@@ -43,6 +43,26 @@ if (SRC / 'main.html').exists():
   (DIST / 'Main.html').write_text(out, encoding='utf-8')
   print('dist/Main.html', round(len(out.encode()) / 1e6, 2), 'MB')
 
+# --- shipped example deck: demo-actuator.js + assets/actuator.glb, exported the way the editor does it ---
+def deck_html(deck_js, title, assets=()):
+    deck = subprocess.check_output(['node', '-e',
+        'global.window={};require(process.argv[1]);process.stdout.write(JSON.stringify(window.DEMO_DECK||window.DECK_SAMPLES.demo))',
+        str(deck_js)]).decode()
+    data = json.dumps(json.loads(deck), ensure_ascii=False).replace('<', '\\u003c')
+    tags = ''.join('<script type="application/octet-stream" data-asset="%s" data-name="%s" data-mime="%s">%s</script>\n'
+                   % (i, f.name, m, base64.b64encode(f.read_bytes()).decode()) for i, f, m in assets)
+    return ('<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            '<meta name="generator" content="Deck Builder">\n<title>' + title + '</title>\n<style>' + rt_css + '</style>\n</head>\n<body>\n' + hud +
+            '\n<script>' + three + '</script>\n<script>' + draco + '</script>\n'
+            '<script type="application/json" id="deck-data">' + data + '</script>\n' + tags +
+            '<script>' + engine + '</script>\n<script>' + player + '</script>\n</body>\n</html>\n')
+
+if '--demo' in sys.argv:
+    html = deck_html(ROOT / 'demo-actuator.js', 'Telescopic Linear Actuator',
+                     [('actuator', ROOT / 'assets' / 'actuator.glb', 'model/gltf-binary')])
+    (ROOT.parent / 'Demo - Telescopic Linear Actuator.html').write_text(html, encoding='utf-8')
+    print('Demo - Telescopic Linear Actuator.html', round(len(html.encode()) / 1e6, 2), 'MB')
+
 # --- test deck: the demo exported the same way the editor does it (used for testing the runtime alone) ---
 if '--test' in sys.argv:
     demo = subprocess.check_output(['node', '-e', 'global.window={};require(process.argv[1]);process.stdout.write(JSON.stringify(window.DECK_SAMPLES.demo))', str(SRC / 'samples.js')]).decode()

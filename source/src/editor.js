@@ -555,6 +555,11 @@ function render3D(s, i) {
   // keep rowsEditor's removals in sync
   const origSplice = cRows.splice.bind(cRows); cRows.splice = (...a) => { const r = origSplice(...a); writeColors(); return r; };
 
+  // Model rotation for this step: the model turns, the floor and the camera stay put.
+  const rot = s.rotate || (s.rotate = {});
+  sec.append(row(3, field('Rotate X °', num(rot, 'x', { step: 5, ph: '0' })), field('Rotate Y °', num(rot, 'y', { step: 5, ph: '0' })), field('Rotate Z °', num(rot, 'z', { step: 5, ph: '0' }))),
+    hint('Turns the model for this step; the floor and the camera stay put. A tall part reads better lying down: try Z 90.'));
+
   // Explode & cut
   sec.append(range('Explode', +s.explode || 0, 0, 2, 0.05, x => x ? x.toFixed(2) + '×' : 'off', x => { setOrDel(s, 'explode', x || null); changed(); }));
   const cut = s.cut || {};
