@@ -44,7 +44,12 @@ pass/fail. **Accents** picks which role paints the deck's accents.
 
 ## Slide types
 
-Title, Section, Card, Two columns, Callout (pinned to a part), Part labels (several tags pinned to parts), Key figures, Table (paste from Excel), Compare, Checklist, Code, Image, Timeline, Model view (caption strip), End.
+| | | | |
+|:--:|:--:|:--:|:--:|
+|![](docs/slide-types/title.png)<br>**Title** | ![](docs/slide-types/callout.png)<br>**Callout** | ![](docs/slide-types/caption.png)<br>**Caption** | ![](docs/slide-types/card.png)<br>**Card**  |
+|![](docs/slide-types/checklist.png)<br>**Checklist** | ![](docs/slide-types/code.png)<br>**Code** | ![](docs/slide-types/compare.png)<br>**Compare** | ![](docs/slide-types/end.png)<br>**End**  |
+|![](docs/slide-types/image.png)<br>**Image** | ![](docs/slide-types/labels.png)<br>**Labels** | ![](docs/slide-types/metrics.png)<br>**Metrics** | ![](docs/slide-types/section.png)<br>**Section** |
+|![](docs/slide-types/split.png)<br>**Split** | ![](docs/slide-types/table.png)<br>**Table** | ![](docs/slide-types/timeline.png)<br>**Timeline** |
 
 Every step can also set focus, highlight, hidden parts, per-part colours, an exploded view, a section cut (X/Y/Z), a camera view and speaker notes. Press `N` in the exported file to show the notes.
 
