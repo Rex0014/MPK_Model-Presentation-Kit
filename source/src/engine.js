@@ -689,7 +689,6 @@ class DeckEngine {
     } else c.target = Math.abs(c.cur) > 1e5 ? (c.cur = 1e6) : open(c.axis, c.flip);
   }
   setExplode(x) {
-    if (x > 0 && this.explode.cur < 1e-3 && this.spin) this.localDirs();
     this.explode.target = x;
   }
   // Lay the model over for this step. tick() eases toward the angles, but the boxes are
@@ -802,10 +801,6 @@ class DeckEngine {
     const ex = this.explode;
     ex.cur += (ex.target - ex.cur) * k2; if (Math.abs(ex.target - ex.cur) < 1e-4) ex.cur = ex.target;
     if (ex.cur !== ex.last) { ex.last = ex.cur; for (const o of this.meshes) if (o.ldir) o.m.position.copy(o.basePos).addScaledVector(o.ldir, ex.cur); }
-    if (this.spin && (this.props.autoSpin ?? true) && ex.cur === 0 && ex.target === 0) {
-      const w = 0.7 * dt;
-      this.spin.main.rotation.x += w; this.spin.counter.rotation.x -= w * this.spin.k1; this.spin.diff.rotation.x += w * this.spin.k1 * this.spin.k2;
-    }
     // section cut
     const c = this.cut;
     if (Math.abs(c.cur) < 1e5) { c.cur += (c.target - c.cur) * k2; }
@@ -840,9 +835,7 @@ class DeckEngine {
   // ---------- model ----------
   loadModelFromConfig(m) {
     const token = this.modelToken = {};
-    this.spin = null;
-    if (!m || (!m.builtin && !toList(m.files).length)) { this.swapIn(new T.Group(), [], { kind: 'none' }); return; }
-    if (m.builtin === 'gearbox') { const [g, meshes] = this.buildGearbox(); this.swapIn(g, meshes, { kind: 'builtin' }); return; }
+    if (!m || !toList(m.files).length) { this.swapIn(new T.Group(), [], { kind: 'none' }); return; }
     this.swapIn(new T.Group(), [], { kind: 'loading' });
     this.setState({ notice: 'Loading model…' });
     const t0 = performance.now();
@@ -891,84 +884,6 @@ class DeckEngine {
     }
   }
 
-  addPart(list, parent, geo, part, o = {}) {
-    const op = o.op ?? 1;
-    const mat = new T.MeshStandardMaterial({ color: o.color ?? 0xc4c8cd, metalness: o.metal ?? 0.75, roughness: o.rough ?? 0.32, emissive: new T.Color('#5980a6'), emissiveIntensity: 0, transparent: true, opacity: op, depthWrite: op > 0.6, side: o.side ?? T.DoubleSide });
-    const m = new T.Mesh(geo, mat);
-    const e = new T.LineSegments(new T.EdgesGeometry(geo, o.edgeAngle ?? 28), new T.LineBasicMaterial({ color: 0x416180, transparent: true, opacity: o.edgeOp ?? 0.5 }));
-    m.add(e); parent.add(m);
-    list.push({ m, e, part, baseOp: op, baseEdge: o.edgeOp ?? 0.5 });
-    return m;
-  }
-  gearGeo(R, w) {
-    const n = Math.max(12, Math.round(R * 30)), depth = Math.min(0.09, R * 0.16);
-    const ro = R + depth / 2, ri = R - depth / 2, st = 2 * Math.PI / n, s = new T.Shape();
-    for (let i = 0; i < n; i++) {
-      const a = i * st;
-      [[ri, a], [ro, a + st * 0.22], [ro, a + st * 0.48], [ri, a + st * 0.7]].forEach(([r, g], j) => {
-        const x = Math.cos(g) * r, y = Math.sin(g) * r; (i === 0 && j === 0) ? s.moveTo(x, y) : s.lineTo(x, y);
-      });
-    }
-    s.closePath();
-    const hole = new T.Path(); hole.absarc(0, 0, Math.min(0.16, R * 0.4), 0, Math.PI * 2, true); s.holes.push(hole);
-    const g = new T.ExtrudeGeometry(s, { depth: w, bevelEnabled: false, curveSegments: 16 });
-    g.translate(0, 0, -w / 2); g.rotateY(Math.PI / 2);
-    return g;
-  }
-  // Built-in demo model: a procedural two-shaft gearbox (parts: input, counter, gears, synchros, shift, diff, housing).
-  buildGearbox() {
-    const root = new T.Group(), list = [];
-    const add = (...a) => this.addPart(list, ...a);
-    const shaft = (r, len) => { const g = new T.CylinderGeometry(r, r, len, 32); g.rotateZ(Math.PI / 2); return g; };
-    const MAIN_Y = 0.9, CNT_Y = -0.35, C = MAIN_Y - CNT_Y;
-    const main = new T.Group(), cnt = new T.Group(), diff = new T.Group();
-    main.position.y = MAIN_Y; cnt.position.y = CNT_Y; root.add(main, cnt, diff);
-    add(main, shaft(0.12, 7.6), 'input').position.x = -0.6;
-    add(cnt, shaft(0.11, 6.6), 'counter').position.x = 0.1;
-    const pairs = [{ x: -3.0, m: 0.5, w: 0.28, part: 'input' }, { x: -2.2, m: 0.86, w: 0.3 }, { x: -1.55, m: 0.76, w: 0.28 }, { x: -0.45, m: 0.66, w: 0.26 }, { x: 0.15, m: 0.58, w: 0.26 }, { x: 1.25, m: 0.51, w: 0.24 }, { x: 1.85, m: 0.45, w: 0.24 }];
-    for (const p of pairs) {
-      const part = p.part || 'gears';
-      add(main, this.gearGeo(p.m, p.w), part).position.x = p.x;
-      const b = add(cnt, this.gearGeo(C - p.m, p.w), part === 'input' ? 'counter' : part); b.position.x = p.x; b.rotation.x = 0.05;
-    }
-    const disc = new T.CylinderGeometry(1.2, 1.2, 0.08, 56); disc.rotateZ(Math.PI / 2);
-    add(main, disc, 'input', { color: 0x9aa3ad, metal: 0.4, rough: 0.6 }).position.x = -4.3;
-    const hub = new T.CylinderGeometry(0.3, 0.3, 0.22, 24); hub.rotateZ(Math.PI / 2);
-    add(main, hub, 'input').position.x = -4.3;
-    const RAIL_Y = 2.25;
-    for (const sx of [-1.88, -0.15, 1.55]) {
-      const hubG = new T.CylinderGeometry(0.4, 0.4, 0.22, 36); hubG.rotateZ(Math.PI / 2);
-      add(main, hubG, 'synchros', { color: 0xb0b6bd }).position.x = sx;
-      const ring = new T.TorusGeometry(0.42, 0.035, 8, 40); ring.rotateY(Math.PI / 2);
-      add(main, ring, 'synchros').position.x = sx;
-      const fork = new T.TorusGeometry(0.47, 0.035, 8, 24, Math.PI); fork.rotateY(Math.PI / 2);
-      add(root, fork, 'shift', { color: 0xa9b0b8 }).position.set(sx, MAIN_Y, 0);
-      add(root, new T.BoxGeometry(0.06, RAIL_Y - MAIN_Y - 0.47, 0.12), 'shift', { color: 0xa9b0b8 }).position.set(sx, (RAIL_Y + MAIN_Y + 0.47) / 2, 0);
-    }
-    add(root, shaft(0.06, 4.6), 'shift').position.set(-0.1, RAIL_Y, 0);
-    add(root, new T.CylinderGeometry(0.05, 0.05, 1.0, 16), 'shift').position.set(0.4, RAIL_Y + 0.5, 0);
-    add(root, new T.SphereGeometry(0.16, 24, 16), 'shift', { color: 0x2b2b2d, metal: 0.2, rough: 0.5 }).position.set(0.4, RAIL_Y + 1.05, 0);
-    const PR = 0.32, RR = 1.05, DX = 2.8, DY = CNT_Y - (PR + RR);
-    add(cnt, this.gearGeo(PR, 0.34), 'diff').position.x = DX;
-    diff.position.set(DX, DY, 0);
-    add(diff, this.gearGeo(RR, 0.3), 'diff');
-    add(diff, shaft(0.5, 0.7), 'diff', { color: 0xb0b6bd });
-    add(diff, shaft(0.09, 6.6), 'diff').position.x = -3.5;
-    add(diff, shaft(0.09, 1.8), 'diff').position.x = 1.1;
-    add(diff, new T.SphereGeometry(0.22, 24, 16), 'diff').position.x = -6.8;
-    add(diff, new T.SphereGeometry(0.22, 24, 16), 'diff').position.x = 2.0;
-    const hs = new T.Shape(), z0 = -1.28, z1 = 1.28, y0 = -2.95, y1 = 2.05, rr = 0.45;
-    hs.moveTo(z0 + rr, y0); hs.lineTo(z1 - rr, y0); hs.quadraticCurveTo(z1, y0, z1, y0 + rr); hs.lineTo(z1, y1 - rr); hs.quadraticCurveTo(z1, y1, z1 - rr, y1);
-    hs.lineTo(z0 + rr, y1); hs.quadraticCurveTo(z0, y1, z0, y1 - rr); hs.lineTo(z0, y0 + rr); hs.quadraticCurveTo(z0, y0, z0 + rr, y0);
-    const hg = new T.ExtrudeGeometry(hs, { depth: 6.8, bevelEnabled: false, curveSegments: 10 }); hg.rotateY(Math.PI / 2); hg.translate(-3.45, 0, 0);
-    const hOpts = { color: 0xb7c3cf, metal: 0.2, rough: 0.6, op: 0.07, edgeOp: 0.4 };
-    add(root, hg, 'housing', hOpts);
-    const bell = new T.CylinderGeometry(1.85, 1.25, 1.05, 48, 1, true); bell.rotateZ(Math.PI / 2);
-    add(root, bell, 'housing', hOpts).position.set(-3.97, 0.7, 0);
-    root.position.set(-0.15, 0.1, 0);
-    this.spin = { main, counter: cnt, diff, k1: 0.5 / (C - 0.5), k2: PR / RR };
-    return [root, list];
-  }
 
   async loadModel(m) {
     const files = toList(m.files), model = new T.Group(), list = [], parts = m.parts || {}, nodes = [];

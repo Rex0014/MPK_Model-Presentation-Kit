@@ -13,7 +13,7 @@ const STROKE_IMG = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(stro
 const demo = {
   title: 'Telescopic Linear Actuator',
   subtitle: 'Design review · Rev B',
-  settings: { autoSpin: true, showGrid: true, flightSeconds: 1.6 },
+  settings: { showGrid: true, flightSeconds: 1.6 },
   // Four roles, all through the same ramp. Warning leaves the flip off: an open
   // item should read as the same amber whichever theme the deck is in. It is
   // used inline in the guide-rail callout and as the accent of the risks step.

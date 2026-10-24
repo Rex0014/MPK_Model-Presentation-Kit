@@ -153,7 +153,7 @@ function loadDeck(deck, assets, fileName, opts = {}) {
 function normalize(d) {
   d = d || {};
   if (!Array.isArray(d.steps)) d.steps = [];
-  d.settings = Object.assign({ autoSpin: true, showGrid: true, flightSeconds: 1.6, fadeAngle: 35 }, d.settings || {});
+  d.settings = Object.assign({ showGrid: true, flightSeconds: 1.6, fadeAngle: 35 }, d.settings || {});
   d.theme = THEME.themeOf(d.theme);
   return d;
 }
@@ -229,7 +229,7 @@ function renderList() {
   const pane = $('steps-pane'), sc = pane.scrollTop;
   pane.innerHTML = '';
   const deckItem = h('div', { class: 'st-item st-deck' + (ED.sel < 0 ? ' sel' : ''), onclick: () => select(-1) },
-    h('span', { class: 'st-num', html: '&#9881;' }), h('span', { class: 'st-txt' }, h('span', { class: 'st-title' }, 'Deck settings & model'), h('span', { class: 'st-type' }, ED.info.kind === 'file' ? ED.info.meshes + ' meshes' : ED.info.kind === 'builtin' ? 'Demo gearbox' : ED.info.kind === 'loading' ? 'Loading model…' : 'No model')));
+    h('span', { class: 'st-num', html: '&#9881;' }), h('span', { class: 'st-txt' }, h('span', { class: 'st-title' }, 'Deck settings & model'), h('span', { class: 'st-type' }, ED.info.kind === 'file' ? ED.info.meshes + ' meshes' : ED.info.kind === 'loading' ? 'Loading model…' : 'No model')));
   const list = h('ol', { class: 'st-list' });
   ED.deck.steps.forEach((s, i) => {
     const t = TYPES[s.type] ? s.type : 'card';
@@ -658,8 +658,7 @@ function renderDeckInspector(pane) {
     range('Fade slides when orbiting', st.fadeAngle ?? 35, 0, 90, 5, x => x ? 'after ' + x + '°' : 'never', x => { st.fadeAngle = x; changed({ now: true }); }),
     hint('Orbit away from a step\u2019s own view and its slide fades out, so the model is never hidden behind it \u2014 gone by half again as far. Drag, scroll and pan work over the whole view, slide included.'),
     h('div', { style: 'display:flex;gap:16px;flex-wrap:wrap' }, check('Floor grid', st.showGrid !== false, on => { st.showGrid = on; changed(); }),
-      check('Ghost other slides', !!st.ghosts, on => { setOrDel(st, 'ghosts', on || null); changed({ now: true }); }),
-      d.model && d.model.builtin ? check('Spin gears', st.autoSpin !== false, on => { st.autoSpin = on; changed(); }) : null),
+      check('Ghost other slides', !!st.ghosts, on => { setOrDel(st, 'ghosts', on || null); changed({ now: true }); })),
     hint('Only the current step\u2019s slide is shown. <b>Ghost other slides</b> leaves the rest faintly in space, the way the deck used to.')));
   renderPalette(pane);
 
@@ -670,7 +669,6 @@ function renderDeckInspector(pane) {
   ms.append(h('div', { class: 'stat-line' }, status));
   ms.append(h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
     h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: async () => addModelFiles(await pickFile('file-model', true)) }, m && m.files ? 'Add files…' : 'Load STL / GLB…'),
-    h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => { d.model = { builtin: 'gearbox' }; changed({ now: true }); renderInspector(); } }, 'Demo gearbox'),
     m ? h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => { d.model = null; changed({ now: true }); renderInspector(); } }, 'Remove model') : null));
   ms.append(hint('One STL per part gives you named parts straight away. A GLB keeps colours and node names: map nodes to parts below. Draco and meshopt compression are supported. STEP must be exported to STL or GLB first.'));
 
@@ -731,7 +729,6 @@ async function addModelFiles(files) {
     const part = /\.stl$/i.test(f.name) ? f.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^\w-]+/g, '-') : undefined;
     d.model.files.push(Object.assign({ asset: id, name: f.name }, part ? { part } : {}));
   }
-  if (d.settings.autoSpin === undefined) d.settings.autoSpin = true;
   changed({ now: true });
   if (ED.sel >= 0) select(-1, false); else renderInspector();
   toast('Loading ' + files.map(f => f.name).join(', ') + '…');
@@ -755,10 +752,9 @@ async function openFile(file) {
     const json = text.trim().replace(/^[\s\S]*?^\s*window\.PRESENTATION\s*=\s*/m, '').replace(/;\s*$/, '');
     const deck = JSON.parse(json);
     if (!deck || !Array.isArray(deck.steps)) throw new Error('No "steps" list found in ' + file.name + '.');
-    // Configs from a folder pack: model null meant the built-in gearbox; file references can't be read from here.
+    // Configs from a folder pack: file references can't be read from here.
     const warn = [];
-    if (deck.model === null || deck.model === undefined) deck.model = { builtin: 'gearbox' };
-    else if (deck.model && !deck.model.builtin && (deck.model.src || (deck.model.files && deck.model.files.some(f => f.src)))) { warn.push('the model'); deck.model = null; }
+    if (deck.model && (deck.model.src || (deck.model.files && deck.model.files.some(f => f.src)))) { warn.push('the model'); deck.model = null; }
     deck.steps.forEach(s => { if (s.image && !/^(asset:|data:|https?:)/.test(s.image)) { warn.push('image ' + s.image); delete s.image; } });
     await confirmReplace();
     loadDeck(deck, {}, null, { dirty: true });
@@ -775,12 +771,8 @@ async function confirmReplace() {
 }
 async function newDeck() {
   try { await confirmReplace(); } catch (e) { return; }
-  const pick = await dialog('New presentation', h('div', { class: 'dlg-choices' },
-    h('button', { type: 'button', onclick: () => document.querySelector('.dialog-backdrop')._close('blank') }, h('b', null, 'Blank'), h('span', null, 'One title step, no model. Load your STL/GLB in Deck settings.')),
-    h('button', { type: 'button', onclick: () => document.querySelector('.dialog-backdrop')._close('demo') }, h('b', null, 'Demo deck'), h('span', null, 'Built-in gearbox with one step of every slide type.'))), []);
-  if (!pick) return;
-  loadDeck(clone(SAMPLES[pick]), {}, null);
-  if (pick === 'blank') select(-1, false);
+  loadDeck(clone(SAMPLES.blank), {}, null);
+  select(-1, false);
 }
 
 // ---------- export ----------
@@ -935,7 +927,7 @@ async function boot() {
 
   let draft = null;
   try { draft = await Draft.get(); } catch (e) { }
-  ED.deck = normalize(clone(SAMPLES.demo)); ED.cur = ED.savedSnap = snap();
+  ED.deck = normalize(clone(SAMPLES.blank)); ED.cur = ED.savedSnap = snap();
   ED.engine = new DeckEngine($('stage'), {
     config: ED.deck, assets: ED.assets, keys: false, dim: 0.14,
     onSlideClick: i => { if (!ED.presenting && i !== ED.sel) { ED.sel = i; renderList(); renderInspector(); } },
@@ -943,11 +935,11 @@ async function boot() {
   }, onEngineState);
   ED.engine.start();
   window.editor = ED;
-  if (draft && draft.deck && draft.deck !== JSON.stringify(SAMPLES.demo)) {
+  if (draft && draft.deck && draft.deck !== JSON.stringify(SAMPLES.blank)) {
     const when = new Date(draft.time).toLocaleString();
     loadDeck(JSON.parse(draft.deck), draft.assets || {}, draft.fileName, { savedSnap: draft.savedSnap || '' });
     toast('Restored your last session (' + when + '). Use New for a fresh deck.');
-  } else loadDeck(clone(SAMPLES.demo), {}, null);
+  } else loadDeck(clone(SAMPLES.blank), {}, null);
 }
 boot();
 })();

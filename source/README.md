@@ -57,7 +57,6 @@ Orbit, pan and zoom work over the whole view, the slide included — nothing on 
 Editing a file in `src/` means rebuilding:
 
     python3 build.py            # writes dist/Main.html
-    python3 build.py --test     # also writes dist/test-demo.html (runtime only)
 
 - `src/engine.js`: the 3D slide engine, shared by the editor preview and the exported files. Slide types live in `TYPES` + `RENDER`. The theme block at the top is a port of theme-maker's ramp generator; `node test-theme.js` checks it still matches the library.
 - `src/deck.css` and `vendor/industry.css` address colours as `--color-<role>-NN` only. Those variables are written at runtime by `applyTheme` — onto `<html>` in an exported deck, onto `#stage` in the editor, which is what keeps the editor's own greyscale (`src/editor.css`) out of the slides.

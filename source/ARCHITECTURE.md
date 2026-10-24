@@ -42,7 +42,6 @@ export a standalone deck at all.
 ```
 cd source
 python3 build.py          # → dist/Main.html
-python3 build.py --test   # → also dist/test-demo.html (runtime only, no editor)
 node test-theme.js        # the one self-check: the colour ramps
 ```
 
@@ -139,7 +138,7 @@ host ─┬─ div   cssBack    ← slides with "behind": true
 ```
 
 A step with `behind: true` is wholly behind the model. Occlusion is per slide,
-not per pixel — a back slide never passes half-way through the gearbox — and it
+not per pixel — a back slide never passes half-way through the model — and it
 cannot take clicks, because the canvas is above it.
 
 **Rasterisation.** A CSS3D element is rasterised at its own CSS size and then
