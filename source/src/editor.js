@@ -858,7 +858,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 
 function about() {
     dialog('Deck Builder', h('div', {
-      html: '<p>This GUI Helps you create a presentation around a 3D model. Built for engineers, the vision was to allow them for an easy showcase of their models.</p> <p class="stat-line"> Author: Rex Guil (Rex0014), with the help of Claude Code (Opus 5.5) <p><a href="https://github.com/Rex0014/MPK_Model-Presentation-Kit" target="_blank" rel="noopener">github.com/Rex0014/MPK_Model-Presentation-Kit</a></p> <p class="stat-line"> GPL 3.0 - Bundles Three.js (MIT) / Draco Decoder (Apache-2.0), Barlow (OFL) </p>'
+      html: '<p>This GUI Helps you create a presentation around a 3D model. Built for engineers, the vision was to allow them for an easy showcase of their models.</p> <p class="stat-line"> Author: Rex Guil (Rex0014), with the help of Claude Code (Opus 5.5)</p> <p> Version: 1.1 - Released on the 25/10/2026 </p> <p><a href="https://github.com/Rex0014/MPK_Model-Presentation-Kit" target="_blank" rel="noopener">github.com/Rex0014/MPK_Model-Presentation-Kit</a></p> <p class="stat-line"> GPL 3.0 - Bundles Three.js (MIT) / Draco Decoder (Apache-2.0), Barlow (OFL) </p>'
     }), [{ label: 'Close', value: true, primary: true}]);
 }
 
@@ -924,7 +924,7 @@ async function boot() {
   $('btn-undo').onclick = undo; $('btn-redo').onclick = redo;
   initEdTheme();
   $('btn-export').onclick = () => exportDeck(false);
-  $('btn-export').onclick = () => about;
+  $('btn-about').onclick = about;
   $('btn-present').onclick = () => present(true);
   $('btn-capture').onclick = captureView;
   $('btn-reset').onclick = () => ED.engine.resetView();
