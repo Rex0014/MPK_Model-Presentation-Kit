@@ -172,7 +172,7 @@ body.presenting .ed-presentbar { display: flex; position: fixed; left: 0; right:
 .ed-toasts { position: fixed; left: 16px; bottom: 16px; z-index: 50; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .toast { pointer-events: auto; max-width: 440px; padding: 10px 14px; background: var(--color-neutral-10); color: var(--color-neutral-01); font-size: 13px; line-height: 1.4; box-shadow: var(--shadow-md); }
 .toast.warn { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-accent-04); }
-.dialog-backdrop { z-index: 60; }
+.dialog-backdrop { z-index: 60; background: rgba(0, 0, 0, .55);}
 .dialog { background: var(--color-bg); width: min(480px, 100%); padding: 20px 22px; }
 .dialog .dialog-body { opacity: 1; }
 .dlg-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

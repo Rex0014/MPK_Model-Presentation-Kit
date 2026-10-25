@@ -90,8 +90,7 @@ const THEME = {
   dark: false, surface: 'neutral', accent: 'accent',
   roles: [
     { key: 'neutral', label: 'Neutral', base: '#8C8C90', shades: SURFACE_SHADES, invert: true, inter: 0 },
-    { key: 'accent', label: 'Accent', base: '#5980A6', shades: COLOUR_SHADES, invert: true },
-    { key: 'accent-2', label: 'Accent 2', base: '#728FAB', shades: COLOUR_SHADES, invert: true },
+    { key: 'accent', label: 'Accent', base: '#C8AF4C', shades: COLOUR_SHADES, invert: true },
   ],
 };
 const roleKey = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
