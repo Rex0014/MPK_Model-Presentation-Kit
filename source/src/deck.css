@@ -150,3 +150,13 @@ a:hover { color: var(--color-accent-04); }
 .sl-label .sl-pinbox { width: 250px; min-height: 60px; padding: 10px 14px; gap: 2px; }
 .sl-label b { font-family: var(--font-heading); font-weight: 600; font-size: 22px; line-height: 1.1; }
 .sl-label span { font-size: 13px; line-height: 1.35; color: color-mix(in srgb, var(--color-text) 66%, transparent); }
+
+/* ---------- stress legend ---------- */
+/* Absolute inside the engine's host, so it sits over the canvas in an exported
+   deck and inside the preview stage in the editor, with no layout of its own. */
+.stress-legend { position: absolute; left: 24px; bottom: 96px; z-index: 2; display: flex; flex-wrap: wrap; gap: 0 10px;
+  align-items: stretch; pointer-events: none; font-family: var(--font-body); color: var(--color-text); }
+.stress-legend .sg-bar { width: 14px; min-height: 150px; border: 1px solid var(--color-divider); }
+.stress-legend .sg-ticks { display: flex; flex-direction: column; justify-content: space-between; font-size: 11px;
+  font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+.stress-legend .sg-unit { flex-basis: 100%; margin-top: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent-04); }

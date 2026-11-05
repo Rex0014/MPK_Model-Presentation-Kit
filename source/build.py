@@ -33,6 +33,7 @@ if (SRC / 'main.html').exists():
   parts = {
       'RT_CSS': rt_css, 'RT_HUD': hud, 'RT_THREE': three, 'RT_DRACO': draco, 'RT_ENGINE': engine, 'RT_PLAYER': player,
       'ED_CSS': read(SRC / 'editor.css'), 'ED_SAMPLES': safe_script(read(SRC / 'samples.js'), 'samples'),
+      'ED_STRESS': safe_script(read(SRC / 'stress.js'), 'stress'),
       'ED_MAIN': safe_script(read(SRC / 'editor.js'), 'editor'),
   }
   out = tpl

@@ -4,7 +4,7 @@
 (function () {
 'use strict';
 const T = window.THREE;
-const { OrbitControls, CSS3DRenderer, CSS3DObject, RoomEnvironment, GLTFLoader, DRACOLoader, MeshoptDecoder, STLLoader } = window.THREE_ADDONS;
+const { OrbitControls, CSS3DRenderer, CSS3DObject, RoomEnvironment, GLTFLoader, DRACOLoader, MeshoptDecoder, STLLoader, toCreasedNormals } = window.THREE_ADDONS;
 
 const toList = x => Array.isArray(x) ? x : x ? [x] : [];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -197,6 +197,20 @@ const typeOf = s => TYPES[s && s.type] ? s.type : 'card';
 const tagsOf = (part, groups) => part ? [part, ...Object.keys(groups || {}).filter(g => toList(groups[g]).includes(part))] : [];
 const tagged = (o, names) => o.tags.some(t => names.includes(t));
 
+/* Stress colours: the scale every FEA post-processor uses, cold blue to hot
+   red. Built through T.Color so it lands in the renderer's working colour
+   space like every other colour here, and shared with the legend's gradient so
+   the bar and the model can never drift apart. Scalar 0 in a baked field means
+   "not measured", which reads as neutral grey rather than as a value. */
+const FEA_HEX = ['#2a4b9b', '#00a8c6', '#41b24a', '#f0c419', '#d93a2b'];
+let FEA = null, GREY = null;
+function feaColor(t, out) {
+  if (!FEA) { FEA = FEA_HEX.map(h => new T.Color(h)); GREY = new T.Color('#9a9a9e'); }
+  const x = clamp(t, 0, 1) * (FEA.length - 1), i = Math.min(FEA.length - 2, Math.floor(x));
+  return out.copy(FEA[i]).lerp(FEA[i + 1], x - i);
+}
+const fmtVal = v => !isFinite(v) ? '—' : Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.01) ? v.toPrecision(3) : String(+v.toFixed(2));
+
 // ---------- slide markup ----------
 function head(s, i, n, cls) {
   return '<div class="sl-head' + (cls ? ' ' + cls : '') + '"><span>' + esc(s.kicker) + '</span><span>' + pad(i + 1) + ' / ' + pad(n) + '</span></div>';
@@ -350,6 +364,11 @@ class DeckEngine {
     const css = this.css = mkCSS();
     host.appendChild(css.domElement);
 
+    // The stress legend is plain DOM over the lot: shown only while a step paints a field.
+    this.legendEl = document.createElement('div');
+    this.legendEl.className = 'stress-legend'; this.legendEl.hidden = true;
+    host.appendChild(this.legendEl);
+
     const scene = this.scene = new T.Scene(); this.cssScene = new T.Scene(); this.cssSceneBack = new T.Scene();
     const pmrem = new T.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -410,9 +429,15 @@ class DeckEngine {
     if (!cfg || !Array.isArray(cfg.steps)) throw new Error('The deck data is missing or has no "steps" list.');
     this.cfg = cfg;
     this.props = Object.assign({}, cfg.settings || {}, this.opts.props || {});
+    // Render resolution: device pixels per CSS pixel. Unset = the screen's own
+    // ratio capped at 2; above that it is pure supersampling, which is what
+    // cleans up the jagged silhouette of a coarse CAD mesh. Costs the square.
+    const px = clamp(+this.props.resolution || Math.min(devicePixelRatio, 2), 0.5, 4);
+    if (this.renderer.getPixelRatio() !== px) this.renderer.setPixelRatio(px);
     this.theme = applyTheme(this.themeRoot, cfg.theme);
     this.themeMeshes();
-    const key = JSON.stringify(cfg.model || null);
+    // `fields` are baked results, not geometry: editing one must not reload the model.
+    const key = JSON.stringify(cfg.model ? Object.assign({}, cfg.model, { fields: 0 }) : null);
     if (key !== this.modelKey) { this.modelKey = key; this.loadModelFromConfig(cfg.model || null); }
     this.buildSlides();
     this.layout();
@@ -671,6 +696,7 @@ class DeckEngine {
     this.hidden = toList(c.hide);
     this.setRotation(c.rotate);
     this.applyColors(c.colors);
+    this.setStress(c.stress);
     this.setCut(c.cut);
     this.setExplode(+c.explode || 0);
     this.showSlides(i);
@@ -692,6 +718,72 @@ class DeckEngine {
       const c = map && (o.tags.reduce((v, t) => v ?? map[t], undefined) ?? map['*']);
       o.tc = c && c !== 'original' ? new T.Color(c) : o.base.clone();
     }
+  }
+  /* A baked stress field: one 16-bit scalar per vertex, over every mesh in
+     swapIn's order. Its length is the integrity check — a different vertex
+     count means a different model, and painting it anyway would be inventing
+     measurements. */
+  fieldOf(fieldName) {
+    const cfg = ((this.cfg.model || {}).fields || {})[fieldName];
+    if (!cfg || !cfg.asset || !this.vertexCount) return null;   // no model yet: nothing to paint, and nothing to warn about
+    const cache = this.fieldCache || (this.fieldCache = {});
+    if (cache[cfg.asset] === undefined) {               // by asset, so a re-bake under the same name is seen
+      const buf = this.assetBuf(cfg.asset);
+      const q = buf && buf.byteLength >= 2 ? new Uint16Array(buf, 0, buf.byteLength >> 1) : null;
+      cache[cfg.asset] = q && q.length === this.vertexCount ? q : null;
+      if (!cache[cfg.asset]) console.warn('Stress field "' + fieldName + '": ' + (q ? q.length + ' values for ' + this.vertexCount + ' vertices' : 'no data') + ', ignoring.');
+    }
+    // Only the array is cached; the range and unit are read fresh, so editing them takes effect at once.
+    const q = cache[cfg.asset];
+    return q ? { q, lo: +cfg.lo || 0, hi: cfg.hi === undefined ? 1 : +cfg.hi, unit: cfg.unit || '' } : null;
+  }
+  /* Paint the field onto the meshes as a vertex-colour attribute and let
+     material.color go white, so opacity, the clip plane, explode and the
+     highlight fade all keep working exactly as they do without it. */
+  setStress(st) {
+    const f = st && st.field ? this.fieldOf(st.field) : null;
+    if (!f) {
+      if (this.stressOn) for (const o of this.meshes) {
+        if (!o.stressWas) continue;
+        o.stressWas = false;
+        if (o.baseColorAttr) o.m.geometry.setAttribute('color', o.baseColorAttr); else o.m.geometry.deleteAttribute('color');
+        o.m.material.vertexColors = o.baseVC; o.m.material.needsUpdate = true;
+      }
+      this.stressOn = false; this.showLegend(null); return;
+    }
+    const num = v => v === undefined || v === null || v === '' || isNaN(+v) ? null : +v;
+    const lo = num(st.min) ?? f.lo, hi = num(st.max) ?? f.hi;
+    const span = hi > lo ? hi - lo : 1, step = (f.hi - f.lo) / 65534, c = new T.Color();
+    feaColor(0, c);                                     // forces the ramp (and GREY) to exist
+    for (const o of this.meshes) {
+      const g = o.m.geometry, n = o.vCount;
+      let attr = o.stressAttr;
+      if (!attr || attr.count !== n) attr = o.stressAttr = new T.BufferAttribute(new Float32Array(n * 3), 3);
+      const arr = attr.array;
+      for (let i = 0; i < n; i++) {
+        const q = f.q[o.vOff + i];
+        if (q) feaColor((f.lo + (q - 1) * step - lo) / span, c); else c.copy(GREY);
+        arr[3 * i] = c.r; arr[3 * i + 1] = c.g; arr[3 * i + 2] = c.b;
+      }
+      attr.needsUpdate = true;
+      if (!o.stressWas) { o.baseColorAttr = g.getAttribute('color') || null; o.baseVC = !!o.m.material.vertexColors; o.stressWas = true; }
+      g.setAttribute('color', attr);
+      if (!o.m.material.vertexColors) { o.m.material.vertexColors = true; o.m.material.needsUpdate = true; }
+      o.tc = new T.Color(1, 1, 1);                      // tick() eases material.color here; white lets the vertex colours through
+    }
+    this.stressOn = true;
+    this.showLegend({ lo, hi, unit: f.unit, label: st.field });
+  }
+  // The bar's gradient comes from the same array the meshes are painted from.
+  showLegend(x) {
+    const el = this.legendEl; if (!el) return;
+    if (!x) { el.hidden = true; return; }
+    const ticks = [];
+    for (let i = 4; i >= 0; i--) ticks.push('<span>' + fmtVal(x.lo + (x.hi - x.lo) * i / 4) + '</span>');
+    el.innerHTML = '<div class="sg-bar"></div><div class="sg-ticks">' + ticks.join('') + '</div>' +
+      '<div class="sg-unit">' + esc(x.label) + (x.unit ? ' · ' + esc(x.unit) : '') + '</div>';
+    el.firstChild.style.background = 'linear-gradient(to top,' + FEA_HEX.join(',') + ')';
+    el.hidden = false;
   }
   setCut(cut) {
     const c = this.cut, box = this.modelBox;
@@ -876,13 +968,18 @@ class DeckEngine {
     this.model = model; this.meshes = meshes; this.scene.add(model);
     model.rotation.set(0, 0, 0);
     this.rot = { cur: [0, 0, 0], target: [0, 0, 0] }; this.measured = null;
-    let tris = 0;
+    let tris = 0, voff = 0;
+    this.fieldCache = null;
     for (const o of meshes) {
       o.m.material.clippingPlanes = [this.clip];
       if (o.e) o.e.material.clippingPlanes = [this.clip];
       o.basePos = o.m.position.clone();
+      // A baked stress field is one scalar per vertex over every mesh in this
+      // order; the total is what proves a field still belongs to this model.
+      o.vOff = voff; o.vCount = o.m.geometry.attributes.position.count; voff += o.vCount;
       tris += (o.m.geometry.index ? o.m.geometry.index.count : o.m.geometry.attributes.position.count) / 3;
     }
+    this.vertexCount = voff;
     this.measure();
     this.explode.cur = this.explode.last = 0;
     this.cut.cur = this.cut.target = 1e6;
@@ -936,6 +1033,8 @@ class DeckEngine {
     const s = (m.size ?? 9) / (Math.max(size.x, size.y, size.z) || 1);
     wrap.scale.setScalar(s); wrap.position.copy(c).multiplyScalar(-s);
     const g = new T.Group(); g.add(wrap);
+    // The cloud is in the file's coordinates, so a bake needs this frame, not the scaled/centred one.
+    g.userData.modelRoot = model;
     const keys = Object.keys(parts);
     model.traverse(o => {
       if (!o.isMesh) return;
@@ -947,6 +1046,11 @@ class DeckEngine {
       const tris = (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
       // Edge extraction is the slowest step on dense CAD meshes; skip it above a triangle budget unless forced.
       if (m.edges === true || (m.edges !== false && tris <= (m.edgeMaxTriangles ?? 150000))) { e = new T.LineSegments(new T.EdgesGeometry(o.geometry, m.edgeAngle ?? 30), new T.LineBasicMaterial({ color: 0x416180, transparent: true, opacity: 0.4 })); o.add(e); }
+      // Auto-smooth, Blender-style: weld co-located vertices and average their
+      // normals, but only across edges whose faces meet below the crease angle,
+      // so a faceted STEP export shades round while its hard edges stay hard.
+      // ponytail: whole-mesh, no triangle budget — it is opt-in and off by default.
+      if (m.smooth) o.geometry = toCreasedNormals(o.geometry, (+m.smooth) * Math.PI / 180);
       const tags = tagsOf(part, groups);
       const mo = tags.reduce((v, t) => v ?? (m.materials || {})[t], undefined) || (m.materials || {})['*'];
       if (mo) {

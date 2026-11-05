@@ -55,7 +55,7 @@ body.ed { font-size: 14px; }
 .btn-sm { font-size: 12.5px; padding: 3px 8px; }
 .btn-icon.btn-sm { width: 26px; height: 26px; padding: 0; }
 
-.ed-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr) 392px; }
+.ed-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr) 430px; }
 .ed-steps { border-right: 1px solid var(--color-divider); overflow: auto; display: flex; flex-direction: column; background: var(--color-bg); }
 .ed-insp { border-left: 1px solid var(--color-divider); overflow: auto; background: var(--color-bg); }
 .ed-view { min-width: 0; display: flex; flex-direction: column; background: var(--color-neutral-03); }
@@ -119,8 +119,12 @@ body.presenting .ed-presentbar { display: flex; position: fixed; left: 0; right:
 .field > label .val { font-variant-numeric: tabular-nums; color: var(--color-text); }
 .in-row { display: grid; grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); gap: 8px; align-items: end; }
 .ed .input { min-height: 32px; padding: 5px 8px; font-size: 13.5px; background: var(--color-neutral-02); }
-.ed textarea.input { min-height: 64px; line-height: 1.45; }
-.ed textarea.code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: 12.5px; min-height: 150px; white-space: pre; tab-size: 4; }
+/* Content boxes grow with their text (native field-sizing, falls back to the
+   min-height), clamped so a long body can't push the rest of the panel away.
+   rows= picks the floor: 2 for a caption, 3-4 for a real body. */
+.ed textarea.input { min-height: 84px; max-height: 55vh; line-height: 1.55; font-size: 14.5px; field-sizing: content; border-color: color-mix(in srgb, var(--color-text) 26%, transparent); }
+.ed textarea.input[rows="3"], .ed textarea.input[rows="4"] { min-height: 170px; }
+.ed textarea.code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: 13px; min-height: 200px; white-space: pre; tab-size: 4; }
 .ed select.input { padding-right: 4px; }
 .ed input[type=color] { width: 36px; height: 30px; padding: 2px; border: 1px solid var(--color-divider); background: var(--color-neutral-02); cursor: pointer; flex: none; }
 .ed input[type=range] { width: 100%; accent-color: var(--color-accent); }

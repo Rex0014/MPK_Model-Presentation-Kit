@@ -51,10 +51,13 @@
 <input type="file" id="file-model" accept=".stl,.glb,.gltf" multiple hidden>
 <input type="file" id="file-image" accept="image/*" hidden>
 <input type="file" id="file-video" accept="video/*" hidden>
+<input type="file" id="file-points" accept=".txt,.csv,.dat,.pts,.xyz,text/plain,text/csv" hidden>
 <script id="rt-three">/*@RT_THREE@*/</script>
 <script id="rt-draco">/*@RT_DRACO@*/</script>
 <script id="rt-engine">/*@RT_ENGINE@*/</script>
 <script type="text/plain" id="rt-player">/*@RT_PLAYER@*/</script>
+<!-- Editor only: the bake runs here, the exported deck ships its result. -->
+<script id="ed-stress">/*@ED_STRESS@*/</script>
 <script id="ed-samples">/*@ED_SAMPLES@*/</script>
 <script id="ed-main">/*@ED_MAIN@*/</script>
 </body>

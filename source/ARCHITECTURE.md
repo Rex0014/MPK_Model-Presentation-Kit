@@ -44,6 +44,8 @@ cd source
 python3 build.py          # → dist/Main.html
 node test-theme.js        # the colour ramps, against theme-maker
 node test-groups.js       # part/group name resolution
+node test-stress.js       # the stress point-cloud join (--bench for timings)
+node test-smooth.js       # auto-smooth: crease angle, in degrees
 ```
 
 `dist/Main.html` is the editor. Copy it to the repo root to ship it.
@@ -55,10 +57,12 @@ node test-groups.js       # part/group name resolution
 ```jsonc
 {
   "title": "…", "subtitle": "…",
-  "settings": { "flightSeconds": 1.6, "showGrid": true, "ghosts": false, "fadeAngle": 35 },
+  "settings": { "flightSeconds": 1.6, "showGrid": true, "ghosts": false, "fadeAngle": 35,
+                "resolution": 2 },
   "theme":    { "dark": false, "surface": "neutral", "accent": "accent", "roles": [ … ] },
   "model":    { "files": [ { "asset": "a1b2c3", "name": "shaft.stl", "part": "shaft" } ],
-                "upAxis": "z", "size": 9, "parts": { … }, "groups": { … }, "materials": { … } },
+                "upAxis": "z", "size": 9, "smooth": 30,
+                "parts": { … }, "groups": { … }, "materials": { … } },
   "steps": [
     { "type": "card", "title": "…", "body": "<p>HTML</p>",
       "focus": ["input"], "highlight": [], "hide": [], "colors": {},
@@ -131,6 +135,44 @@ and the four places that resolve a name (`partBox`, the highlight/hide pass in
 So a group works wherever a part does, and because the part's own name comes
 first in `tags`, a per-part setting wins over its group's. Groups do not nest.
 `node test-groups.js` checks that order.
+
+### Stress fields (experimental)
+
+A stress map is a scalar per *vertex*, and the reason that works is that the
+FEA mesh is the mesh being displayed. So this is a positional **join**, not an
+interpolation: every point in the cloud already sits on a vertex that exists,
+and a lookup is needed only because exporters renumber and split vertices (STL
+writes three per triangle, GLB splits at normal seams). The tolerance is a weld
+tolerance, not an influence radius.
+
+The work happens once, in the editor (`src/stress.js`, which the exported deck
+does not carry), because the input does not fit anywhere else:
+
+```
+  X Y Z value, 10^7 lines, 10^8 bytes        ← never leaves the editor
+            │  streamed through
+            ▼
+  voxel hash over the MESH vertices (10^5)   ← the bounded side gets the index
+            │
+            ▼
+  Uint16 per vertex over [lo,hi]  →  asset   ← 2 bytes a vertex is what ships
+```
+
+Indexing the mesh rather than the cloud is what keeps memory flat — nothing
+ever holds the whole file — and it discards the interior nodes of a solid mesh
+for free, since only surface vertices ask. `coverage` (matched vertices over
+total) is the diagnostic: 100% means the two exports agree, 12% means they do
+not, and it says so before anyone believes a picture. Scalar 0 is reserved for
+"not measured", which paints grey.
+
+`model.fields[name]` holds `{ asset, lo, hi, unit, vertices }`; a step points at
+one with `"stress": { "field": "vonmises", "min": 0, "max": 320 }`. At playback
+`setStress()` writes a vertex-colour attribute and sets `material.color` white,
+so opacity, the clip plane, explode and the highlight fade all keep working
+untouched. The array's length against `vertexCount` is the integrity check — a
+different count means a different model, and the field is ignored rather than
+painted onto geometry it was not baked for. `model.fields` is excluded from the
+model key in `setConfig`, so editing a field never reloads the model.
 
 ### Slides are DOM, and that has consequences
 

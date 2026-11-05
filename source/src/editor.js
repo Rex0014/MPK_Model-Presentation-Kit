@@ -66,6 +66,7 @@ const snap = () => JSON.stringify(ED.deck);
 function toast(msg, warn, ms) {
   const t = h('div', { class: 'toast' + (warn ? ' warn' : '') }, msg);
   $('toasts').append(t); setTimeout(() => t.remove(), ms || (warn ? 7000 : 3200));
+  return t;
 }
 function dialog(title, body, actions) {
   return new Promise(res => {
@@ -381,6 +382,81 @@ function partSelect(value, onChange, opts = {}) {
   return dropdown([['', opts.none || '— part —'], ...names.map(n => [n, n === '*' ? 'all parts' : gs.includes(n) ? n + ' (group)' : n])], value || '', onChange);
 }
 
+// ---------- stress fields (experimental) ----------
+const fmtF = v => v === undefined || v === null || !isFinite(v) ? '?' : Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.01) ? (+v).toPrecision(3) : String(+(+v).toFixed(2));
+
+/* Every mesh vertex in the FILE's coordinates, in the same order the engine
+   walks its meshes. The cloud is in the file's frame; the scene's is scaled,
+   centred and up-axis-rotated, so the wrap transform has to come back out. */
+function modelVertices() {
+  const eng = ED.engine, root = eng.model && eng.model.userData.modelRoot;
+  if (!root || !eng.meshes.length) return null;
+  root.updateWorldMatrix(true, true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), m = new THREE.Matrix4(), v = new THREE.Vector3();
+  const out = new Float32Array(eng.vertexCount * 3);
+  for (const o of eng.meshes) {
+    const pos = o.m.geometry.attributes.position;
+    m.multiplyMatrices(inv, o.m.matrixWorld);
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m);
+      const k = (o.vOff + i) * 3; out[k] = v.x; out[k + 1] = v.y; out[k + 2] = v.z;
+    }
+  }
+  return out;
+}
+
+async function importStress(file, name, tol, cols) {
+  const verts = modelVertices();
+  if (!verts) { toast('Load a model first: a stress field is baked onto its vertices.', true); return; }
+  const note = toast('Reading ' + file.name + '\u2026', false, 10 * 60 * 1000);
+  const t0 = performance.now();
+  const r = await StressBake.bake(verts, file.stream(), {
+    tol: tol * (new THREE.Box3().setFromArray(verts).getSize(new THREE.Vector3()).length() || 1),
+    columns: cols,
+    onProgress: n => { if (note) note.textContent = 'Reading ' + file.name + ' \u2014 ' + fmtSize(n) + ' of ' + fmtSize(file.size); },
+  });
+  note && note.remove();
+  if (!r.matched) {
+    toast('No point matched a vertex (' + r.rows.toLocaleString() + ' rows read). Wrong coordinate frame, or widen the tolerance.', true);
+    return;
+  }
+  const q = StressBake.quantise(r.values, r.hit, r.lo, r.hi);
+  const m = ED.deck.model;
+  (m.fields || (m.fields = {}))[name] = {
+    asset: 'a' + Math.random().toString(36).slice(2, 9), lo: r.lo, hi: r.hi, unit: '', vertices: r.vertices,
+    coverage: Math.round(r.coverage * 1000) / 10, points: r.rows,
+  };
+  ED.assets[m.fields[name].asset] = { name: name + '.f16', mime: 'application/octet-stream', buf: q.buffer, size: q.byteLength };
+  changed({ now: true }); renderInspector();
+  toast(name + ': ' + r.rows.toLocaleString() + ' points \u2192 ' + (r.coverage * 100).toFixed(1) + '% of vertices, ' +
+    fmtF(r.lo) + '\u2026' + fmtF(r.hi) + ', ' + Math.round(performance.now() - t0) + ' ms');
+}
+
+function stressSection(m) {
+  const sec = section('Stress maps (experimental)');
+  sec.append(hint('A text file of X Y Z value, one point per line. The FEA mesh must be the model loaded above: ' +
+    'each point is matched to the vertex it sits on, and what gets saved is one value per vertex \u2014 the source file is not kept, so a 100 MB cloud costs a few hundred kB.'));
+  const cfg = { name: 'stress', tol: 1e-5, cols: '1,2,3,4' };
+  const nameIn = h('input', { class: 'input', value: cfg.name, placeholder: 'field name', oninput: e => cfg.name = e.target.value.trim() });
+  const tolIn = h('input', { class: 'input', type: 'number', step: 'any', value: cfg.tol, title: 'As a fraction of the model size', oninput: e => cfg.tol = +e.target.value || 1e-5 });
+  const colIn = h('input', { class: 'input', value: cfg.cols, placeholder: 'x,y,z,value', title: 'Which columns hold X, Y, Z and the value (1-based)', oninput: e => cfg.cols = e.target.value });
+  sec.append(row(3, field('Field name', nameIn), field('Match tolerance', tolIn), field('Columns', colIn)));
+  sec.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: async () => {
+    const [f] = await pickFile('file-points'); if (!f) return;
+    const cols = cfg.cols.split(/[\s,]+/).map(x => parseInt(x, 10) - 1);
+    if (cols.length !== 4 || cols.some(c => !(c >= 0))) { toast('Columns must be four positive numbers, e.g. 1,2,3,4.', true); return; }
+    importStress(f, cfg.name || 'stress', cfg.tol, cols);
+  } }, 'Load point cloud\u2026'));
+  sec.append(hint('Nodal values sit exactly on vertices, so the default tolerance is tight. Element-centroid values sit between them \u2014 if coverage comes back low, widen it to about one element.'));
+
+  const fs = m.fields || {};
+  if (Object.keys(fs).length) sec.append(field('Fields', h('div', { class: 'rows' }, Object.entries(fs).map(([k, f]) => h('div', { class: 'file-row' },
+    h('div', { class: 'file-name', title: k }, k, h('small', null, fmtF(f.lo) + '\u2026' + fmtF(f.hi) + ' · ' + (f.coverage ?? '?') + '% of vertices · ' + fmtSize(assetSize(f.asset)))),
+    h('input', { class: 'input', value: f.unit || '', placeholder: 'unit', title: 'Shown on the legend', oninput: e => { setOrDel(f, 'unit', e.target.value.trim()); changed(); } }),
+    iconBtn('del', 'Remove field', () => { delete m.fields[k]; if (!Object.keys(m.fields).length) delete m.fields; changed({ now: true }); renderInspector(); }))))));
+  return sec;
+}
+
 // ---------- assets ----------
 const uid = () => 'a' + Math.random().toString(36).slice(2, 9);
 async function addAsset(file) {
@@ -579,6 +655,24 @@ function render3D(s, i) {
   // keep rowsEditor's removals in sync
   const origSplice = cRows.splice.bind(cRows); cRows.splice = (...a) => { const r = origSplice(...a); writeColors(); return r; };
 
+  // Stress field for this step (experimental). Painting a field overrides the
+  // colours above, so the two are offered as one choice, not two.
+  const fields = Object.keys(((ED.deck.model || {}).fields) || {});
+  if (fields.length) {
+    const st = s.stress || {};
+    const box = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
+    box.append(dropdown([['', 'Off \u2014 use the colours above'], ...fields.map(f => [f, f])], st.field || '', v => {
+      if (v) { s.stress = Object.assign(s.stress || {}, { field: v }); } else delete s.stress;
+      changed({ now: true }); renderInspector();
+    }));
+    if (st.field) {
+      const f = ED.deck.model.fields[st.field] || {};
+      box.append(row(2, field('Scale min', num(st, 'min', { step: 'any', ph: fmtF(f.lo) })), field('Scale max', num(st, 'max', { step: 'any', ph: fmtF(f.hi) }))),
+        hint('Blank follows the data (' + fmtF(f.lo) + ' \u2026 ' + fmtF(f.hi) + (f.unit ? ' ' + esc(f.unit) : '') + '). Pin both to compare one step against another.'));
+    }
+    sec.append(field('Stress map (experimental)', box));
+  }
+
   // Model rotation for this step: the model turns, the floor and the camera stay put.
   const rot = s.rotate || (s.rotate = {});
   sec.append(row(3, field('Rotate X °', num(rot, 'x', { step: 5, ph: '0' })), field('Rotate Y °', num(rot, 'y', { step: 5, ph: '0' })), field('Rotate Z °', num(rot, 'z', { step: 5, ph: '0' }))),
@@ -680,6 +774,8 @@ function renderDeckInspector(pane) {
   pane.append(section('Presentation', field('Title', txt(d, 'title', 'Shown top-left and as the file title')), field('Subtitle', txt(d, 'subtitle', 'Shown under the title')),
     range('Camera flight', st.flightSeconds ?? 1.6, 0.3, 4, 0.1, x => x.toFixed(1) + ' s', x => { st.flightSeconds = x; changed(); }),
     range('Fade slides when orbiting', st.fadeAngle ?? 35, 0, 90, 5, x => x ? 'after ' + x + '°' : 'never', x => { st.fadeAngle = x; changed({ now: true }); }),
+    range('Render resolution', st.resolution ?? 0, 0, 4, 0.5, x => x ? x + '\u00d7 pixels' : 'auto (screen)', x => { setOrDel(st, 'resolution', x || null); changed(); }),
+    hint('Pixels drawn per screen pixel. <b>Auto</b> follows the display. Above it the model is supersampled, which is the cure for the jagged silhouette of a coarse STEP export \u2014 cost grows with the square, so 2\u00d7 is plenty on a laptop.'),
     hint('Orbit away from a step\u2019s own view and its slide fades out, so the model is never hidden behind it \u2014 gone by half again as far. Drag, scroll and pan work over the whole view, slide included.'),
     h('div', { style: 'display:flex;gap:16px;flex-wrap:wrap' }, check('Floor grid', st.showGrid !== false, on => { st.showGrid = on; changed(); }),
       check('Ghost other slides', !!st.ghosts, on => { setOrDel(st, 'ghosts', on || null); changed({ now: true }); })),
@@ -705,6 +801,8 @@ function renderDeckInspector(pane) {
       field('Up axis', seg([['y', 'Y up'], ['z', 'Z up (CAD)']], (m.upAxis || 'y').toLowerCase(), a => { m.upAxis = a; changed({ now: true }); })),
       field('Size', num(m, 'size', { step: 0.5, ph: '9' })),
       field('Edges', dropdown([['', 'Auto'], ['on', 'Always'], ['off', 'Never']], m.edges === true ? 'on' : m.edges === false ? 'off' : '', v => { if (v === 'on') m.edges = true; else if (v === 'off') m.edges = false; else delete m.edges; changed({ now: true }); }))));
+    ms.append(range('Auto-smooth', m.smooth ?? 0, 0, 90, 5, x => x ? 'below ' + x + '\u00b0' : 'off', x => { setOrDel(m, 'smooth', x || null); changed(); }),
+      hint('Blender\u2019s Shade Auto Smooth. Faces meeting below this angle share one averaged normal, so a faceted STL shades round while real edges stay sharp. 30\u00b0 suits most CAD; too high and the whole model goes soft. Re-smooths the mesh on change, a second or two on a dense one.'));
 
     // Part mapping (GLB node names → part)
     const parts = m.parts || {};
@@ -729,7 +827,7 @@ function renderDeckInspector(pane) {
     const origS3 = gRows.splice.bind(gRows); gRows.splice = (...a) => { const r = origS3(...a); writeGroups(); return r; };
     const gSec = section('Groups', hint('A group names several parts at once. Focus, highlight, hide, recolour, label and base materials all take a group where they take a part; a part\u2019s own setting wins over its group\u2019s.'), gr);
 
-    pane.append(ms, pSec, gSec);
+    pane.append(ms, pSec, gSec, stressSection(m));
 
     // Base materials per part
     const mats = m.materials || {};
@@ -813,6 +911,7 @@ async function newDeck() {
 function usedAssets() {
   const ids = new Set(), d = ED.deck;
   if (d.model && d.model.files) d.model.files.forEach(f => f.asset && ids.add(f.asset));
+  if (d.model && d.model.fields) Object.values(d.model.fields).forEach(f => f && f.asset && ids.add(f.asset));
   JSON.stringify(d.steps, (k, v) => { if (typeof v === 'string' && v.startsWith('asset:')) ids.add(v.slice(6)); return v; });
   return [...ids].filter(id => ED.assets[id]);
 }
