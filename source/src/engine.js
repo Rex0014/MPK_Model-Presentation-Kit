@@ -184,11 +184,18 @@ const TYPES = {
   checklist: { w: 660,  h: 460, place: 'side', frac: 0.45, label: 'Checklist', hint: 'Items with a status.' },
   code:      { w: 760,  h: 480, place: 'side', frac: 0.5, label: 'Code', hint: 'Code block with line numbers.' },
   image:     { w: 820,  h: 560, place: 'side', frac: 0.55, label: 'Image', hint: 'Large picture with a caption.' },
+  video:     { w: 900,  h: 580, place: 'side', frac: 0.58, label: 'Video', hint: 'Video with a caption; plays when the step is up.' },
   timeline:  { w: 1100, h: 300, place: 'side', defSide: 'bottom', label: 'Timeline', hint: 'Milestones along a line.' },
   caption:   { w: 900,  h: 140, place: 'side', defSide: 'bottom', label: 'Model view', hint: 'The model is the slide; a short caption strip.' },
   end:       { w: 760,  h: 440, place: 'center', label: 'End', hint: 'Closing slide.' },
 };
 const typeOf = s => TYPES[s && s.type] ? s.type : 'card';
+
+/* A part is a name for some meshes; a group is a name for some parts. A mesh
+   answers to its own part name and to every group that holds it, so focus,
+   highlight, hide, colours and labels take either without knowing which. */
+const tagsOf = (part, groups) => part ? [part, ...Object.keys(groups || {}).filter(g => toList(groups[g]).includes(part))] : [];
+const tagged = (o, names) => o.tags.some(t => names.includes(t));
 
 // ---------- slide markup ----------
 function head(s, i, n, cls) {
@@ -218,7 +225,7 @@ const RENDER = {
     return CORNERS + x.head('on-dark') + '<h1>' + esc(s.title || 'Questions') + '</h1>' + body(s.body);
   },
   card(s, x) {
-    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' + body(s.body) + figure(x.url(s.image), s, 'duotone sl-fig') + specsTable(s);
+    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' + body(s.body) + figure(x.url(s.image), s, 'sl-fig') + specsTable(s);
   },
   split(s, x) {
     const right = body(s.body2) + figure(x.url(s.image), s, 'sl-fig') + specsTable(s);
@@ -261,8 +268,17 @@ const RENDER = {
   image(s, x) {
     const src = x.url(s.image);
     return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' +
-      (src ? '<figure class="blueprint sl-bigfig' + (s.duotone ? ' duotone' : '') + '">' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '" style="object-fit:' + (s.fit === 'cover' ? 'cover' : 'contain') + (s.duotone ? ';filter:grayscale(1)' : '') + '"></figure>'
+      (src ? '<figure class="blueprint sl-bigfig">' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '" style="object-fit:' + (s.fit === 'cover' ? 'cover' : 'contain') + '"></figure>'
         : '<div class="sl-bigfig sl-empty">No image</div>') + body(s.body, 'sl-cap');
+  },
+  /* Slides are real DOM, so a <video> here is a real video element: it plays in
+     place, in 3D. showSlide() starts and stops it with the step. */
+  video(s, x) {
+    const src = x.url(s.video);
+    const att = (s.controls === false ? '' : ' controls') + (s.loop === false ? '' : ' loop') + (s.sound ? '' : ' muted');
+    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' +
+      (src ? '<figure class="blueprint sl-bigfig sl-vid">' + CORNERS + '<video src="' + esc(src) + '"' + att + ' playsinline preload="metadata" style="object-fit:' + (s.fit === 'cover' ? 'cover' : 'contain') + '"></video></figure>'
+        : '<div class="sl-bigfig sl-empty">No video</div>') + body(s.body, 'sl-cap');
   },
   timeline(s, x) {
     const ms = toList(s.milestones);
@@ -436,7 +452,8 @@ class DeckEngine {
 
   // ---------- slides ----------
   buildSlides() {
-    for (const sl of this.slides) for (const p of sl.parts) p.obj.parent && p.obj.parent.remove(p.obj);
+    // A detached <video> keeps playing, so stop the outgoing ones before dropping them.
+    for (const sl of this.slides) { if (sl.vid) sl.vid.pause(); for (const p of sl.parts) p.obj.parent && p.obj.parent.remove(p.obj); }
     const steps = this.cfg.steps, n = steps.length;
     this.slides = steps.map((s, i) => {
       const type = typeOf(s), t = TYPES[type], parts = [];
@@ -468,7 +485,7 @@ class DeckEngine {
       // the stylesheet; clear it so the camera gets the whole view and only the
       // .pickable descendants opt back in.
       for (const p of parts) { p.obj = new CSS3DObject(p.wrap); p.wrap.style.pointerEvents = 'none'; layer.add(p.obj); }
-      return { cfg: s, type, parts };
+      return { cfg: s, type, parts, vid: parts[0] && parts[0].el.querySelector('video') };
     });
   }
   // A step may borrow another role for its accent: re-point --color-accent* on
@@ -503,7 +520,7 @@ class DeckEngine {
   // ---------- model geometry queries ----------
   partBox(names, ex) {
     const box = new T.Box3(), tmp = new T.Box3();
-    for (const o of this.meshes) if (names.includes(o.part) && o.box) {
+    for (const o of this.meshes) if (tagged(o, names) && o.box) {
       tmp.copy(o.box); if (ex && o.wdir) tmp.translate(o.wdir.clone().multiplyScalar(ex));
       box.union(tmp);
     }
@@ -672,7 +689,7 @@ class DeckEngine {
     for (const o of this.meshes) {
       const mt = o.m.material; if (!mt.color) continue;
       o.base = o.base || mt.color.clone();
-      const c = map && (map[o.part] ?? map['*']);
+      const c = map && (o.tags.reduce((v, t) => v ?? map[t], undefined) ?? map['*']);
       o.tc = c && c !== 'original' ? new T.Color(c) : o.base.clone();
     }
   }
@@ -747,6 +764,11 @@ class DeckEngine {
     if (sl.cur === undefined) sl.cur = op;
     const pick = op >= 1 && this.state.overview;
     for (const p of sl.parts) p.wrap.classList.toggle('pickable', pick);
+    // One video per slide at most, and only the step you are on: overview would play them all.
+    if (sl.vid) {
+      if (op >= 1 && !this.state.overview) { if (sl.cfg.autoplay !== false) sl.vid.play().catch(() => { }); }
+      else sl.vid.pause();
+    }
   }
   /* How far the camera has swung from this step's own view, as a 0..1 fade.
      Past `fadeAngle` degrees the slide starts going; it is gone half again as
@@ -809,7 +831,7 @@ class DeckEngine {
 
     const hl = this.highlight || [], any = hl.length > 0, hid = this.hidden || [];
     for (const o of this.meshes) {
-      const on = hl.includes(o.part), off = hid.includes(o.part), mt = o.m.material;
+      const on = tagged(o, hl), off = tagged(o, hid), mt = o.m.material;
       const tOp = off ? 0 : any && !on ? Math.min(o.baseOp, 0.16) : o.baseOp;
       const tEm = on && !off ? 0.45 : 0, tEdge = off ? 0 : on ? 0.95 : any ? 0.12 : o.baseEdge;
       mt.opacity += (tOp - mt.opacity) * k;
@@ -885,7 +907,7 @@ class DeckEngine {
 
 
   async loadModel(m) {
-    const files = toList(m.files), model = new T.Group(), list = [], parts = m.parts || {}, nodes = [];
+    const files = toList(m.files), model = new T.Group(), list = [], parts = m.parts || {}, groups = m.groups || {}, nodes = [];
     for (const f of files) {
       const buf = this.assetBuf(f.asset);
       if (!buf) throw new Error('Missing data for ' + (f.name || f.asset));
@@ -925,14 +947,15 @@ class DeckEngine {
       const tris = (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
       // Edge extraction is the slowest step on dense CAD meshes; skip it above a triangle budget unless forced.
       if (m.edges === true || (m.edges !== false && tris <= (m.edgeMaxTriangles ?? 150000))) { e = new T.LineSegments(new T.EdgesGeometry(o.geometry, m.edgeAngle ?? 30), new T.LineBasicMaterial({ color: 0x416180, transparent: true, opacity: 0.4 })); o.add(e); }
-      const mo = (m.materials || {})[part] || (m.materials || {})['*'];
+      const tags = tagsOf(part, groups);
+      const mo = tags.reduce((v, t) => v ?? (m.materials || {})[t], undefined) || (m.materials || {})['*'];
       if (mo) {
         if (mo.color && o.material.color) o.material.color.set(mo.color);
         if (mo.metalness !== undefined) o.material.metalness = mo.metalness;
         if (mo.roughness !== undefined) o.material.roughness = mo.roughness;
         if (mo.opacity !== undefined) o.material.opacity = mo.opacity;
       }
-      list.push({ m: o, e, part, baseOp: o.material.opacity ?? 1, baseEdge: 0.4 });
+      list.push({ m: o, e, part, tags, baseOp: o.material.opacity ?? 1, baseEdge: 0.4 });
     });
     return [g, list, nodes];
   }
@@ -941,5 +964,6 @@ class DeckEngine {
 window.DeckEngine = DeckEngine;
 window.DeckEngine.TYPES = TYPES;
 window.DeckEngine.esc = esc;
+window.DeckEngine.groups = { tagsOf, tagged };
 window.DeckEngine.theme = { ramp, themeOf, applyTheme, addRole, roleKey, defaults: THEME, surfaceShades: SURFACE_SHADES, colourShades: COLOUR_SHADES };
 })();

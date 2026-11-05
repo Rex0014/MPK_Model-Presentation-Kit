@@ -52,7 +52,6 @@ a:hover { color: var(--color-accent-04); }
 .sl-specs td:last-child { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
 .sl-fig { margin: 0; height: 180px; }
 .sl-fig img { width: 100%; height: 100%; object-fit: cover; }
-.sl-card .sl-fig img { filter: grayscale(1); }
 
 .sl-title { padding: 40px 52px 36px; gap: 18px; }
 .sl-title h1 { font-size: 100px; line-height: .92; margin-top: 12px; }
@@ -114,6 +113,9 @@ a:hover { color: var(--color-accent-04); }
 .sl-image { gap: 14px; }
 .sl-bigfig { margin: 0; flex: 1; min-height: 360px; display: flex; }
 .sl-bigfig img { width: 100%; height: 360px; flex: 1; }
+.sl-video { gap: 14px; }
+.sl-vid video { width: 100%; height: 380px; flex: 1; background: #000; }
+.sl video[controls] { pointer-events: auto; }  /* the camera owns the pointer everywhere else */
 .sl-empty { border: 1px dashed var(--color-divider); display: grid; place-items: center; color: color-mix(in srgb, var(--color-text) 50%, transparent); }
 
 .sl-timeline { padding: 26px 40px 30px; gap: 18px; }

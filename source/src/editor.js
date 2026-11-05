@@ -349,17 +349,22 @@ function rowsEditor(arr, renderRow, make, addLabel, opts = {}) {
   return box;
 }
 
-// Part chips: toggles names in arr. Shows the model's parts plus any names already in the list.
+// Group names are pickable anywhere a part is, so a step can address several parts at once.
+const groupNames = () => Object.keys((ED.deck.model && ED.deck.model.groups) || {});
+const pickNames = opts => opts.noGroups ? ED.info.parts : [...groupNames(), ...ED.info.parts];
+
+// Part chips: toggles names in arr. Shows the model's parts and groups plus any names already in the list.
 function partChips(get, set, opts = {}) {
-  const known = ED.info.parts, cur = toList(get());
+  const known = pickNames(opts), cur = toList(get());
   const names = [...new Set([...(opts.all ? ['*'] : []), ...known, ...cur])];
+  const gs = groupNames();
   if (!names.length) {
     return h('div', null, h('input', { class: 'input', type: 'text', value: cur.join(', '), placeholder: 'part names, comma separated', oninput: e => { set(e.target.value.split(',').map(x => x.trim()).filter(Boolean)); changed(); } }),
       hint(ED.info.kind === 'none' ? 'Add a model in Deck settings to pick parts here.' : 'This model has no named parts yet. Name them in Deck settings → Parts.'));
   }
   const box = h('div', { class: 'chips' });
   for (const n of names) {
-    const b = h('button', { type: 'button', class: 'chip' + (cur.includes(n) ? ' on' : '') + (!known.includes(n) && n !== '*' ? ' missing' : ''), title: known.includes(n) || n === '*' ? '' : 'Not found in the current model' }, n === '*' ? 'all' : n);
+    const b = h('button', { type: 'button', class: 'chip' + (cur.includes(n) ? ' on' : '') + (!known.includes(n) && n !== '*' ? ' missing' : ''), title: gs.includes(n) ? 'Group of ' + toList(ED.deck.model.groups[n]).length + ' parts' : known.includes(n) || n === '*' ? '' : 'Not found in the current model' }, n === '*' ? 'all' : gs.includes(n) ? n + ' ▣' : n);
     b.onclick = () => {
       const list = toList(get()).slice(), k = list.indexOf(n);
       k >= 0 ? list.splice(k, 1) : list.push(n);
@@ -370,9 +375,10 @@ function partChips(get, set, opts = {}) {
   return box;
 }
 function partSelect(value, onChange, opts = {}) {
-  const names = [...new Set([...(opts.all ? ['*'] : []), ...ED.info.parts, ...(value ? [value] : [])])];
+  const names = [...new Set([...(opts.all ? ['*'] : []), ...pickNames(opts), ...(value ? [value] : [])])];
   if (!names.length) return h('input', { class: 'input', type: 'text', value: value || '', placeholder: 'part', oninput: e => onChange(e.target.value.trim()) });
-  return dropdown([['', opts.none || '— part —'], ...names.map(n => [n, n === '*' ? 'all parts' : n])], value || '', onChange);
+  const gs = groupNames();
+  return dropdown([['', opts.none || '— part —'], ...names.map(n => [n, n === '*' ? 'all parts' : gs.includes(n) ? n + ' (group)' : n])], value || '', onChange);
 }
 
 // ---------- assets ----------
@@ -384,7 +390,7 @@ async function addAsset(file) {
 }
 function mimeOf(name) {
   const e = name.split('.').pop().toLowerCase();
-  return { stl: 'model/stl', glb: 'model/gltf-binary', gltf: 'model/gltf+json', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', svg: 'image/svg+xml', webp: 'image/webp', gif: 'image/gif' }[e] || 'application/octet-stream';
+  return { stl: 'model/stl', glb: 'model/gltf-binary', gltf: 'model/gltf+json', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', svg: 'image/svg+xml', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime' }[e] || 'application/octet-stream';
 }
 function assetSize(id) { const a = ED.assets[id]; return a ? (a.size || (a.buf ? a.buf.byteLength : a.b64 ? Math.round(a.b64.length * 0.75) : 0)) : 0; }
 function pickFile(input, multiple) {
@@ -393,12 +399,19 @@ function pickFile(input, multiple) {
     el.onchange = () => res([...el.files]); el.click();
   });
 }
-function imageField(s, key) {
-  const src = s[key] ? ED.engine.assetUrl(s[key]) : '';
-  const thumb = h('div', { class: 'img-thumb', style: src ? 'background-image:url("' + src.replace(/"/g, '%22') + '")' : '' }, src ? '' : 'No image');
-  const set = async files => { const f = files.find(f => /^image\//.test(f.type) || /\.(png|jpe?g|svg|webp|gif)$/i.test(f.name)); if (!f) return; s[key] = 'asset:' + await addAsset(f); changed({ now: true }); renderInspector(); };
+// One field for both: `kind` picks the accept filter, the file input and the thumbnail.
+const MEDIA = {
+  image: { re: /^image\//, ext: /\.(png|jpe?g|svg|webp|gif|avif)$/i },
+  video: { re: /^video\//, ext: /\.(mp4|m4v|webm|ogv|mov)$/i },
+};
+const imageField = (s, key) => mediaField(s, key, 'image');
+function mediaField(s, key, kind = 'image') {
+  const k = MEDIA[kind], src = s[key] ? ED.engine.assetUrl(s[key]) : '';
+  const thumb = src && kind === 'video' ? h('video', { class: 'img-thumb', src, muted: true, loop: true, autoplay: true, playsinline: true })
+    : h('div', { class: 'img-thumb', style: src ? 'background-image:url("' + src.replace(/"/g, '%22') + '")' : '' }, src ? '' : 'No ' + kind);
+  const set = async files => { const f = files.find(f => k.re.test(f.type) || k.ext.test(f.name)); if (!f) return; s[key] = 'asset:' + await addAsset(f); changed({ now: true }); renderInspector(); };
   const box = h('div', { class: 'img-field' }, thumb, h('div', { style: 'display:flex;flex-direction:column;gap:6px' },
-    h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: async () => set(await pickFile('file-image')) }, s[key] ? 'Replace image…' : 'Choose image…'),
+    h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: async () => set(await pickFile('file-' + kind)) }, (s[key] ? 'Replace ' : 'Choose ') + kind + '…'),
     s[key] ? h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => { delete s[key]; changed({ now: true }); renderInspector(); } }, 'Remove') : null));
   box.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
   box.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); set([...e.dataTransfer.files]); });
@@ -452,7 +465,7 @@ function renderStepInspector(pane, s, i) {
     case 'title': c.append(k(), t(), b('Intro'), specs('Key figures (shown as a row)')); break;
     case 'section': c.append(k(), row(2, field('Big number', txt(s, 'number', pad(i + 1))), h('span')), t(), b('Subtitle', 'body', 2)); break;
     case 'end': c.append(k(), t('Questions'), b('Line under the title', 'body', 2)); break;
-    case 'card': c.append(k(), t(), b(), field('Image (shown in the theme\'s duotone)', imageField(s, 'image')), specs()); break;
+    case 'card': c.append(k(), t(), b(), field('Image', imageField(s, 'image')), specs()); break;
     case 'split': c.append(k(), t(), b('Left column'), b('Right column', 'body2'), field('Image (right column)', imageField(s, 'image')), specs('Specs (right column)')); break;
     case 'callout':
       if (!toList(s.focus).length) c.append(h('p', { class: 'in-warn' }, 'A callout points at its focus part. Pick one under 3D → Focus.'));
@@ -476,8 +489,19 @@ function renderStepInspector(pane, s, i) {
       c.append(k(), t(), row(2, field('Language label', txt(s, 'lang', 'python')), h('span')), field('Code', area(s, 'code', '', { code: true, keep: true, rows: 10 })), b('Caption', 'body', 2)); break;
     case 'image':
       c.append(k(), t(), field('Image', imageField(s, 'image')), field('Alt text', txt(s, 'imageAlt', 'Describe the image')),
-        row(2, field('Fit', seg([['contain', 'Whole image'], ['cover', 'Fill frame']], s.fit === 'cover' ? 'cover' : 'contain', v => { s.fit = v; changed(); })), field('Theme tint', check('Duotone', s.duotone, v => { setOrDel(s, 'duotone', v || null); changed(); }))),
+        field('Fit', seg([['contain', 'Whole image'], ['cover', 'Fill frame']], s.fit === 'cover' ? 'cover' : 'contain', v => { s.fit = v; changed(); })),
         b('Caption', 'body', 2)); break;
+    case 'video':
+      c.append(k(), t(), field('Video file', mediaField(s, 'video', 'video')),
+        row(2, field('Fit', seg([['contain', 'Whole frame'], ['cover', 'Fill frame']], s.fit === 'cover' ? 'cover' : 'contain', v => { s.fit = v; changed(); })),
+          field('Playback', h('div', { style: 'display:flex;gap:14px;flex-wrap:wrap' },
+            check('Autoplay', s.autoplay !== false, v => { setOrDel(s, 'autoplay', v ? null : false); changed({ now: true }); }),
+            check('Loop', s.loop !== false, v => { setOrDel(s, 'loop', v ? null : false); changed({ now: true }); }),
+            check('Sound', !!s.sound, v => { setOrDel(s, 'sound', v || null); changed({ now: true }); }),
+            check('Controls', s.controls !== false, v => { setOrDel(s, 'controls', v ? null : false); changed({ now: true }); })))),
+        b('Caption', 'body', 2));
+      if (s.sound && s.autoplay !== false) c.append(hint('Browsers block autoplay with sound until the page has been clicked, so the video may wait for a click on this step.'));
+      break;
     case 'timeline':
       c.append(k(), t(), field('Milestones', rowsEditor(s.milestones || (s.milestones = []), (m, j, acts) => [
         row(2, txt(m, 'date', 'Date'), dropdown([['done', 'Done'], ['current', 'Current'], ['next', 'Upcoming']], m.status || 'next', v => { m.status = v; changed(); })),
@@ -695,7 +719,17 @@ function renderDeckInspector(pane) {
       hint('A part groups meshes so steps can focus, highlight, hide, recolour or label them. Node names are matched by "contains", case-insensitive.'), pr);
     if (nodes.length) pSec.append(field('Nodes found in the model', h('div', { class: 'chips' }, nodes.slice(0, 80).map(n => h('button', { class: 'chip', type: 'button', title: 'Add as a part', onclick: () => { pRows.push({ name: n.toLowerCase().replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'part', subs: n }); writeParts(); renderInspector(); } }, n)))),
       h('button', { class: 'btn btn-secondary btn-sm add-b', type: 'button', onclick: () => { pRows.length = 0; nodes.forEach(n => pRows.push({ name: n.toLowerCase().replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'part', subs: n })); writeParts(); renderInspector(); } }, 'One part per node'));
-    pane.append(ms, pSec);
+
+    // Groups: a name for several parts, pickable anywhere a part is.
+    const gRows = Object.entries(m.groups || {}).map(([name, list]) => ({ name, parts: toList(list) }));
+    const writeGroups = () => { const o = {}; gRows.forEach(r => { if (r.name.trim()) o[r.name.trim()] = r.parts; }); setOrDel(m, 'groups', Object.keys(o).length ? o : null); changed({ now: true }); };
+    const gr = rowsEditor(gRows, (r, j, acts) => [h('input', { class: 'input', value: r.name, placeholder: 'group name', oninput: e => { r.name = e.target.value; writeGroups(); } }),
+      partChips(() => r.parts, l => { r.parts = l; writeGroups(); }, { noGroups: true }), acts],
+      () => ({ name: 'group' + (gRows.length + 1), parts: [] }), '+ Group', { cols: '0.8fr 1.2fr auto' });
+    const origS3 = gRows.splice.bind(gRows); gRows.splice = (...a) => { const r = origS3(...a); writeGroups(); return r; };
+    const gSec = section('Groups', hint('A group names several parts at once. Focus, highlight, hide, recolour, label and base materials all take a group where they take a part; a part\u2019s own setting wins over its group\u2019s.'), gr);
+
+    pane.append(ms, pSec, gSec);
 
     // Base materials per part
     const mats = m.materials || {};

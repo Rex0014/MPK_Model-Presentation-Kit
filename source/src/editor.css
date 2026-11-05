@@ -163,6 +163,7 @@ body.presenting .ed-presentbar { display: flex; position: fixed; left: 0; right:
 
 .img-field { display: flex; gap: 10px; align-items: center; }
 .img-thumb { width: 96px; height: 60px; flex: none; border: 1px solid var(--color-divider); background: var(--color-neutral-02) center/contain no-repeat; display: grid; place-items: center; font-size: 11px; color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+video.img-thumb { object-fit: contain; background: #000; }
 .file-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
 .file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-name small { display: block; font-size: 11px; color: color-mix(in srgb, var(--color-text) 55%, transparent); }

@@ -19,6 +19,7 @@ const defaults = {
   checklist: { kicker: 'Kicker', title: 'Checklist', items: [{ text: 'Item', status: 'open' }, { text: 'Item', status: 'done' }] },
   code: { kicker: 'Kicker', title: 'Code', lang: 'python', code: 'print("hello")', body: '' },
   image: { kicker: 'Kicker', title: 'Image', image: '', body: 'Caption.' },
+  video: { kicker: 'Kicker', title: 'Video', video: '', body: 'Caption.' },
   timeline: { kicker: 'Plan', title: 'Timeline', milestones: [{ date: 'Q1', title: 'Milestone', status: 'done' }, { date: 'Q2', title: 'Milestone', status: 'current' }, { date: 'Q3', title: 'Milestone', status: 'next' }] },
   caption: { kicker: 'View', title: 'Model view', body: 'One-line caption.' },
   end: { kicker: 'End', title: 'Questions', body: '' },

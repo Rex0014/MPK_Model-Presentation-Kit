@@ -42,7 +42,8 @@ export a standalone deck at all.
 ```
 cd source
 python3 build.py          # → dist/Main.html
-node test-theme.js        # the one self-check: the colour ramps
+node test-theme.js        # the colour ramps, against theme-maker
+node test-groups.js       # part/group name resolution
 ```
 
 `dist/Main.html` is the editor. Copy it to the repo root to ship it.
@@ -57,7 +58,7 @@ node test-theme.js        # the one self-check: the colour ramps
   "settings": { "flightSeconds": 1.6, "showGrid": true, "ghosts": false, "fadeAngle": 35 },
   "theme":    { "dark": false, "surface": "neutral", "accent": "accent", "roles": [ … ] },
   "model":    { "files": [ { "asset": "a1b2c3", "name": "shaft.stl", "part": "shaft" } ],
-                "upAxis": "z", "size": 9, "parts": { … }, "materials": { … } },
+                "upAxis": "z", "size": 9, "parts": { … }, "groups": { … }, "materials": { … } },
   "steps": [
     { "type": "card", "title": "…", "body": "<p>HTML</p>",
       "focus": ["input"], "highlight": [], "hide": [], "colors": {},
@@ -121,6 +122,15 @@ them each frame rather than snapping:
 A **part** is just a name. `model.parts` maps a part name to substrings matched
 case-insensitively against node names; one STL per file gets a part name from
 the filename for free.
+
+A **group** is a name for several parts: `model.groups` maps a group name to a
+list of part names. Nothing in the table above knows groups exist. At load time
+each mesh gets `tags` — its own part name first, then every group holding it —
+and the four places that resolve a name (`partBox`, the highlight/hide pass in
+`tick`, `applyColors`, the base-material lookup) ask `tags` instead of `part`.
+So a group works wherever a part does, and because the part's own name comes
+first in `tags`, a per-part setting wins over its group's. Groups do not nest.
+`node test-groups.js` checks that order.
 
 ### Slides are DOM, and that has consequences
 
@@ -186,6 +196,10 @@ the rule:
   point is to see what the slide you are on is covering. It is a mode, not a
   one-shot, so it stays on as you step through, and the button reads *Show
   slides* while it is.
+
+Because it is the one place that knows which slide is up, it is also where a
+`video` slide's element is played and paused — overview included, where every
+slide is visible but only one step is current.
 
 It sets `sl.op`, a target, rather than a style. `tick()` eases each slide's
 real opacity toward `sl.op × slideFade()` and writes it only on change. That
