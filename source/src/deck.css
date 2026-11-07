@@ -36,8 +36,12 @@ a:hover { color: var(--color-accent-04); }
 .sl-wrap { position: relative; pointer-events: none; }
 .sl a, .sl-pinbox a { pointer-events: auto; }
 .sl-wrap.pickable > .sl, .sl-wrap.pickable .sl-pinbox { pointer-events: auto; cursor: pointer; }
+/* --sl-just places the content when the slide is taller than it needs to be;
+   --sl-auto is the margin-top:auto the blocks below use to push themselves to
+   the bottom, which a hand-placed slide hands back so justify-content can act. */
 .sl { box-sizing: border-box; color: var(--color-text); font-family: var(--font-body); pointer-events: none;
-  display: flex; flex-direction: column; gap: 16px; padding: 34px 40px 30px; background: color-mix(in srgb, var(--color-bg) 93%, transparent); }
+  display: flex; flex-direction: column; gap: 16px; padding: 34px 40px 30px; justify-content: var(--sl-just, flex-start);
+  background: color-mix(in srgb, var(--color-bg) 93%, transparent); }
 .sl h1, .sl h2, .sl h3, .sl h4, .sl-pin h3 { margin: 0; }
 .sl h2 { font-size: 46px; line-height: 1.02; }
 .sl-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent-04); }
@@ -46,17 +50,22 @@ a:hover { color: var(--color-accent-04); }
 .sl-body > :first-child { margin-top: 0; } .sl-body > :last-child { margin-bottom: 0; }
 .sl-body ul, .sl-body ol { padding-left: 20px; margin: 0 0 8px; }
 .sl-body code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: .9em; background: color-mix(in srgb, var(--color-text) 7%, transparent); padding: 1px 4px; }
-.sl-specs { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: auto; }
+.sl-specs { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: var(--sl-auto, auto); }
 .sl-specs td { padding: 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); }
 .sl-specs td:first-child { color: color-mix(in srgb, var(--color-text) 64%, transparent); }
 .sl-specs td:last-child { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
-.sl-fig { margin: 0; height: 180px; }
-.sl-fig img { width: 100%; height: 100%; object-fit: cover; }
+/* A figure's box comes from the step, as the vars figVars in engine.js writes,
+   and falls back to the slide type's own design size. Height or aspect ratio
+   sizes it, width and align place it in the column, pad insets the picture
+   inside the frame and bleed pushes the frame out through the slide's padding. */
+.sl-fig, .sl-bigfig { box-sizing: border-box; margin: 0; aspect-ratio: var(--fig-ar, auto); width: var(--fig-w, 100%); }
+.sl-fig { height: var(--fig-h, 180px); align-self: var(--fig-al, stretch); }
+.sl-fig img { width: 100%; height: 100%; object-fit: var(--fig-fit, cover); }
 
 .sl-title { padding: 40px 52px 36px; gap: 18px; }
 .sl-title h1 { font-size: 100px; line-height: .92; margin-top: 12px; }
 .sl-title .sl-body { font-size: 21px; max-width: 640px; }
-.sl-figures { margin-top: auto; display: grid; border-top: 1px solid var(--color-divider); }
+.sl-figures { margin-top: var(--sl-auto, auto); display: grid; border-top: 1px solid var(--color-divider); }
 .sl-figures > div { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 4px; border-left: 1px solid var(--color-divider); }
 .sl-figures > div:first-child { padding-left: 0; border-left: 0; }
 .sl-figures span { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent-04); }
@@ -64,15 +73,29 @@ a:hover { color: var(--color-accent-04); }
 
 .sl-section, .sl-end { --color-text: var(--color-accent-01); background: var(--color-accent-05); padding: 40px 52px 44px; gap: 12px; }
 .sl-section .corner, .sl-end .corner { color: var(--color-accent-02); }
-.sl-bignum { margin-top: auto; font-family: var(--font-heading); font-weight: 400; font-size: 150px; line-height: .85; color: var(--color-accent-01); }
+.sl-bignum { margin-top: var(--sl-auto, auto); font-family: var(--font-heading); font-weight: 400; font-size: 150px; line-height: .85; color: var(--color-accent-01); }
 .sl-section h2 { font-size: 64px; line-height: 1; }
 .sl-section .sl-body, .sl-end .sl-body { font-size: 19px; max-width: 560px; }
-.sl-end h1 { margin-top: auto; font-size: 110px; line-height: .9; }
+.sl-end h1 { margin-top: var(--sl-auto, auto); font-size: 110px; line-height: .9; }
+
+/* Chapters: an agenda. Rows that point at a step are <a>, which is also what
+   opts them back into the pointer; the rest are <span> so the grid is the same. */
+.sl-chap { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sl-chap li { padding-left: 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); }
+.sl-chap li > * { display: grid; grid-template-columns: 2.4em 1fr; gap: 3px 16px; padding: 13px 0; align-items: baseline; color: inherit; text-decoration: none; }
+.sl-chap .n { font-family: var(--font-heading); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--color-accent-04); }
+.sl-chap b { font-family: var(--font-heading); font-weight: 600; font-size: 30px; line-height: 1.05; }
+.sl-chap .note { grid-column: 2; font-size: 14px; line-height: 1.4; color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+.sl-chap .st-done { color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+.sl-chap .st-done .n { color: color-mix(in srgb, var(--color-accent-04) 55%, transparent); }
+.sl-chap .st-current { border-left-color: var(--color-accent-04); }
+.sl-chap .st-current b { color: var(--color-accent-04); }
+.sl-chap a:hover b { color: var(--color-accent-04); }
 
 .sl-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; flex: 1; }
 .sl-cols > div { display: flex; flex-direction: column; gap: 14px; }
 
-.sl-stats { display: grid; gap: 22px 0; margin-top: auto; border-top: 1px solid var(--color-divider); }
+.sl-stats { display: grid; gap: 22px 0; margin-top: var(--sl-auto, auto); border-top: 1px solid var(--color-divider); }
 .sl-stats > div { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px 0; border-left: 1px solid var(--color-divider); }
 .sl-stats > div:first-child { border-left: 0; padding-left: 0; }
 .sl-stats .lbl { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent-04); }
@@ -111,12 +134,23 @@ a:hover { color: var(--color-accent-04); }
 .sl-cap { font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent); }
 
 .sl-image { gap: 14px; }
-.sl-bigfig { margin: 0; flex: 1; min-height: 360px; display: flex; }
-.sl-bigfig img { width: 100%; height: 360px; flex: 1; }
+.sl-bigfig { flex: var(--fig-flex, 1); min-height: var(--fig-h, 360px); align-self: var(--fig-al, stretch); display: flex; }
+.sl-bigfig img { width: 100%; height: var(--fig-h, 360px); min-height: 0; flex: 1; object-fit: var(--fig-fit, contain); }
 .sl-video { gap: 14px; }
-.sl-vid video { width: 100%; height: 380px; flex: 1; background: #000; }
+.sl-vid video { width: 100%; height: var(--fig-h, 380px); min-height: 0; flex: 1; background: #000; object-fit: var(--fig-fit, contain); }
 .sl video[controls] { pointer-events: auto; }  /* the camera owns the pointer everywhere else */
 .sl-empty { border: 1px dashed var(--color-divider); display: grid; place-items: center; color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+
+/* Buttons to other steps. They are <a> elements, which is what opts them back
+   into the pointer (.sl a above); everything else on a slide belongs to the camera. */
+.sl-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--sl-auto, auto); padding-top: 4px; }
+.sl-jump { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 14px; line-height: 1.2; text-decoration: none;
+  color: var(--color-accent-04); border: 1px solid var(--color-accent-04); background: color-mix(in srgb, var(--color-accent-04) 7%, transparent); cursor: pointer; }
+.sl-jump::after { content: "\2192"; font-size: 15px; }
+.sl-jump:hover { color: var(--color-accent-01); background: var(--color-accent-04); }
+.sl-section .sl-jump, .sl-end .sl-jump { color: var(--color-accent-01); border-color: color-mix(in srgb, var(--color-accent-01) 50%, transparent); }
+.sl-section .sl-jump:hover, .sl-end .sl-jump:hover { color: var(--color-accent-05); background: var(--color-accent-01); }
+.sl-pinbox .sl-links { padding: 0 16px 14px; }
 
 .sl-timeline { padding: 26px 40px 30px; gap: 18px; }
 .sl-tl-top { display: flex; flex-direction: column; gap: 6px; }

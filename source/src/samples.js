@@ -9,6 +9,8 @@ const blank = {
 const defaults = {
   title: { kicker: 'Kicker', title: 'Title', body: 'One or two sentences.', specs: [['Figure', 'Value']] },
   section: { kicker: 'Part', title: 'Section title', body: '' },
+  chapters: { kicker: 'Agenda', title: 'Chapters', chapters: [
+    { title: 'First chapter', status: 'current' }, { title: 'Second chapter', status: 'next' }, { title: 'Third chapter', status: 'next' }] },
   card: { kicker: 'Kicker', title: 'Card title', body: '<p>Body text.</p>', specs: [] },
   split: { kicker: 'Kicker', title: 'Two columns', body: '<p>Left column.</p>', body2: '<p>Right column.</p>', specs: [] },
   callout: { kicker: 'Kicker', title: 'Callout', body: '<p>Short note.</p>' },

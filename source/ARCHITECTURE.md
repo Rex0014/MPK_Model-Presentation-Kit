@@ -46,6 +46,7 @@ node test-theme.js        # the colour ramps, against theme-maker
 node test-groups.js       # part/group name resolution
 node test-stress.js       # the stress point-cloud join (--bench for timings)
 node test-smooth.js       # auto-smooth: crease angle, in degrees
+node test-links.js        # step links by id, and the in-place re-tag
 ```
 
 `dist/Main.html` is the editor. Copy it to the repo root to ship it.
@@ -64,11 +65,16 @@ node test-smooth.js       # auto-smooth: crease angle, in degrees
                 "upAxis": "z", "size": 9, "smooth": 30,
                 "parts": { … }, "groups": { … }, "materials": { … } },
   "steps": [
-    { "type": "card", "title": "…", "body": "<p>HTML</p>",
+    { "id": "p4f2a1", "type": "card", "title": "…", "body": "<p>HTML</p>",
       "focus": ["input"], "highlight": [], "hide": [], "colors": {},
       "explode": 0, "cut": { "axis": "x", "at": 50 }, "rotate": { "z": 90 },
       "view": { "azimuth": -32, "elevation": 16, "distance": 15 },
-      "side": "right", "behind": false, "accent": "warning", "notes": "…" }
+      "side": "right", "behind": false, "accent": "warning", "notes": "…",
+      "size": 1.2, "dx": 0, "dy": -4,
+      "imageH": 240, "imageW": 70, "imageAlign": "center", "imageTop": false,
+      "imageRatio": "16/9", "fit": "cover",
+      "slideW": 900, "slideH": 520, "fitH": false, "vAlign": "middle",
+      "links": [ { "to": "p9c0b3", "label": "The drive train" } ] }
   ]
 }
 ```
@@ -109,6 +115,19 @@ the camera arcs rather than cutting a chord, with a small distance "bump"
 proportional to the turn so it pulls back as it swings around. `goTo()` is
 `applyStep()` (model state) plus `fly()` (camera).
 
+That bump has a floor, which is why `fly()` asks `sameView` first. Two steps
+can differ only in their slide — same focus, same view, same rotation — and
+flying between those is not a short flight but a pointless one: the radius
+swells by the floor at the midpoint and comes back, so the camera drifts out
+and in across the whole of `flightSeconds` while the orbit controls sit
+disabled. When the step's view is the one already on screen, `fly()` takes the
+instant path instead: nothing moves, and the controls stay live. Position and
+target settle it between them — the spherical pair the flight interpolates in
+cannot differ if those two do not — and the shift is in the comparison because
+it is part of where the camera looks, so a slide swapping sides over a focused
+part still flies. Orbit away first and the camera is no longer at that view, so
+the next step flies back to it as it always did.
+
 ### Model state
 
 `applyStep` sets four things from the step, and `tick()` eases every mesh toward
@@ -126,6 +145,14 @@ them each frame rather than snapping:
 A **part** is just a name. `model.parts` maps a part name to substrings matched
 case-insensitively against node names; one STL per file gets a part name from
 the filename for free.
+
+None of this costs a model reload. The reload key in `setConfig` is geometry
+only — files, up axis, size, smooth, edges — because `parts`, `groups`,
+`materials` and `fields` are names, lists and colours: `retagMeshes` re-derives
+them on the meshes already loaded, from the node names and the `mat0` each mesh
+kept from its file. Naming a part used to go through the key, so every keystroke
+re-parsed the model and re-smoothed it, and the editor pane was rebuilt under the
+caret each time. `onModel` now fires only when the part list actually moves.
 
 A **group** is a name for several parts: `model.groups` maps a group name to a
 list of part names. Nothing in the table above knows groups exist. At load time
@@ -224,6 +251,42 @@ clamped to `[1, 3]` — scaling down never needed help — and pinned at 1 where
 content outgrows its design height still sizes its own box. Opacity lives on
 the wrapper too, so fading never touches the zoomed child.
 
+### Links between steps
+
+A step may carry `links: [{ to, label }]`. `to` is the target step's `id`, so
+moving or inserting steps cannot silently re-aim a button; a numeric `to` is
+still read as an index for a hand-written deck. `linksHtml` appends an `<a
+data-goto="N">` row to the slide (and to a callout's box), `stepIndexOf` resolves
+it, and the slide's own click handler intercepts the anchor before its "go to
+this slide" behaviour. `<a>` is also what opts the button back into the pointer:
+`.sl a` is the one thing on a slide the camera does not own. A link whose target
+is gone renders nothing rather than a dead button.
+
+### Placement
+
+Three per-step knobs sit on top of whatever a type does by itself, all of them
+no-ops when unset so an old deck is unchanged:
+
+| | |
+|---|---|
+| `size` | multiplies the slide's share of the frame in `layout()` (0.4–2.5) |
+| `dx` / `dy` | nudge across and up, in percent of the visible frame |
+| `imageH` / `imageW` / `imageAlign` | the figure's box, written by `figVars` as `--fig-h` / `--fig-w` / `--fig-al`; `deck.css` reads them with the type's design size as the fallback |
+| `imageRatio` / `fit` | the figure's shape, the same way: `--fig-ar` / `--fig-fit`. A ratio is the second way to size a figure, so it also writes `--fig-h: auto` and `--fig-flex: none` to get the height and the flex-grow out of its own way |
+| `slideW` / `slideH` / `fitH` | the slide's own design box, resolved by `sizeOf`. The box is what `layout()` turns into the on-screen one, and what the element is laid out at — so a narrower box is bigger text in the same frame, not a smaller slide |
+| `vAlign` | where the content sits in a slide taller than it needs to be: `--sl-just` on the element. It also writes `--sl-auto: 0`, because the blocks that push themselves down with `margin-top: auto` eat the free space before `justify-content` can see it |
+
+`imageTop` swaps the figure in front of the text on `card` and `split`.
+
+**`fitH` is the only one of these that costs a measurement.** Every other knob
+is arithmetic on numbers already in the deck, but a slide that fits its content
+has no design height to lay out against, so `layout()` reads the one the element
+actually has. It reads it as a *share of the element's own width* rather than as
+a raw `offsetHeight`, because the supersampling `zoom` scales both equally and
+therefore cancels out of the ratio. `layout()` runs on a resize, on a config
+change and once `document.fonts.ready` resolves — never per frame — so the
+reflow it forces is not in the frame loop.
+
 ### Which slides are visible
 
 `showSlides()` is the single place that decides *which* slides are up, so
@@ -289,7 +352,14 @@ and carries its own `invert` flag. Positions mean the same thing in every role:
 | `-04` | trim that reads against the page — kickers, rules, headings. `--color-accent` aliases this |
 | `-05` | a slab — section backgrounds, code blocks |
 | `-01` | what sits on that slab |
-| `-02` | the hex you picked |
+| middle | the hex you picked — `-03` of 5 shades, `-06` of 11 |
+
+The ramp spans from a near-white end to a near-black one through the base, so
+the position of a shade is also roughly its lightness: `-01` is always close to
+white and `-NN` close to black, whatever base the role was given. `inter`
+(default 20) is how far short of pure white and black the ends stop; MPK no
+longer sets it, and `themeOf` drops a stored `inter: 0`, which is what every
+deck built before the full-span ramp carries on its surface role.
 
 `invert` reads the ramp backwards on a dark deck, which is how a position keeps
 its job when the page flips: `-04` stays readable trim, `-05` stays a slab. A
@@ -352,6 +422,7 @@ Three other pieces worth knowing:
 | change how the editor looks | `src/editor.css` — the two fixed ramps at the top are the whole palette |
 | change camera behaviour | `viewFor`, `fly`, `layout` in `engine.js` |
 | change the colour system | the theme block at the top of `engine.js`; `node test-theme.js` guards it against the library |
+| change how a step is placed | `layout()` in `engine.js` (`size`, `dx`, `dy`), `figVars` + `.sl-fig`/`.sl-bigfig` in `deck.css` for the figure box |
 | change the exported file | `buildExport()` in `editor.js`, `src/player.html`, `src/player.js` |
 
 Licences: three.js (MIT), Draco decoder (Apache-2.0), Barlow (OFL).

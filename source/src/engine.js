@@ -45,10 +45,11 @@ function zoomSlide(wrap, k) {
 
 /* ── Theme ───────────────────────────────────────────────────────────────────
    One base hex per colour role, a ramp of shades out. The generator is a port
-   of theme-maker (WEB_ThemeMaker/typescript/src/ramp.ts): each RGB channel
-   steps outward from the base, centred on the middle shade unless it sits too
-   close to black or white to breathe both ways; the shades are then sorted by
-   luminance, so -01 is always the lightest.
+   of theme-maker (TM_Theme-Maker/typescript/src/ramp.ts): the base sits in the
+   middle of the ramp and each RGB channel is interpolated outward from it to
+   the margins — down to `inter`, up to `255 - inter` — so a ramp spans the
+   whole range the margin allows whatever base it was given. The shades are then
+   sorted by luminance, so -01 is always the lightest.
 
    Every colour in a deck is a role and goes through that ramp — there are no
    computed one-off colours. A role is theme-maker's RoleConfig: {key, label,
@@ -65,31 +66,36 @@ function zoomSlide(wrap, k) {
    -text/-divider, `accent` → --color-accent-NN. --color-accent is an alias of
    --color-accent-04, not a colour of its own. */
 const SURFACE_SHADES = 11, COLOUR_SHADES = 5, TRIM = 3;   // -04, the page-facing position
+const MIN_SHADES = 3, MAX_SHADES = 15;                    // a role's own count; the aliases are resampled to the two above
 const hexRgb = hex => { const h = String(hex || '').replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0); };
 const rgbHex = rgb => '#' + rgb.map(c => clamp(Math.round(c), 0, 255).toString(16).padStart(2, '0')).join('').toUpperCase();
 const relLum = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
 function ramp(hex, count, inter) {
   count = count || COLOUR_SHADES; inter = inter == null ? 20 : inter;
-  const rgb = hexRgb(hex), half = Math.floor(count / 2), mid = Math.ceil(count / 2);
-  const room = rgb.map(c => c >= inter && c <= 255 - inter);
-  const step = rgb.map((c, i) => room[i] ? Math.min((c - inter) / half, (255 - inter - c) / half)
-    : (c < inter ? inter : -inter) / (count - 1));
-  const out = [];
-  for (let a = 0; a < count; a++) out.push(rgb.map((c, i) => c + step[i] * (room[i] ? a - mid : a)));
+  const rgb = hexRgb(hex);
+  if (count < 2) return [rgbHex(rgb)];
+  const half = (count - 1) / 2, out = [];
+  for (let a = 0; a < count; a++) {
+    const t = (a - half) / half;                 // -1 at the dark end, 0 at the base, +1 at the light end
+    out.push(rgb.map(c => t < 0 ? c + (c - inter) * t : c + (255 - inter - c) * t));
+  }
+  // A channel already outside the margins steps the "wrong" way (a 0 channel
+  // rises to `inter` at the dark end), so the raw ramp is not monotonic: the
+  // luminance sort is what orders it. Array.prototype.sort is stable.
   return out.sort((x, y) => relLum(y) - relLum(x)).map(rgbHex);
 }
 
-/* The surface default is mid-grey with inter 0 so its ramp reaches both a
-   paper-light and a near-black end: ramp width is bounded by the base's
-   distance to the nearer of those, so a near-white base gives a flat ramp with
-   nothing dark enough for body text. Both accents invert because deck.css uses
-   them as trim on the page; accent-2 is the second colour industry.css's
-   components reach for. */
+/* The surface default is a mid-grey, and it no longer needs an `inter` of its
+   own: the ramp reaches the margins from any base now, so the default margin of
+   20 is what gives a paper-light page and an ink-dark text instead of pure
+   white and pure black. Both accents invert because deck.css uses them as trim
+   on the page; accent-2 is the second colour industry.css's components reach
+   for. */
 const THEME = {
   dark: false, surface: 'neutral', accent: 'accent',
   roles: [
-    { key: 'neutral', label: 'Neutral', base: '#8C8C90', shades: SURFACE_SHADES, invert: true, inter: 0 },
+    { key: 'neutral', label: 'Neutral', base: '#8C8C90', shades: SURFACE_SHADES, invert: true },
     { key: 'accent', label: 'Accent', base: '#C8AF4C', shades: COLOUR_SHADES, invert: true },
   ],
 };
@@ -117,15 +123,25 @@ function themeOf(theme) {
   if (!has(t.surface)) t.surface = t.roles[0].key;
   if (!has(t.accent)) t.accent = t.roles[t.roles.length > 1 ? 1 : 0].key;
   for (const r of t.roles) {
+    /* `inter: 0` is what every deck built before the full-span ramp carries on
+       its surface role — it was the workaround for a ramp bounded by the nearer
+       end, and it now reads as "run all the way to pure black and white", which
+       is not the paper-and-ink those decks were designed against. */
+    if (r.inter === 0) delete r.inter;
     const isSurface = r.key === t.surface;
     // Being the surface is what makes a role wide, and it has to invert — that
     // flip is the whole of dark mode. Everything else follows its own config.
-    r.shades = r.shades || (isSurface ? SURFACE_SHADES : COLOUR_SHADES);
+    // The shade count is the deck's to set; the slot only supplies the default.
+    r.shades = clamp(Math.round(+r.shades || (isSurface ? SURFACE_SHADES : COLOUR_SHADES)), MIN_SHADES, MAX_SHADES);
     r.invert = isSurface ? true : !!r.invert;
   }
   return t;
 }
 const setRamp = (el, name, list) => list.forEach((hex, i) => el.style.setProperty('--color-' + name + '-' + pad(i + 1), hex));
+/* An alias keeps its canonical length whatever its role's shade count is:
+   deck.css and industry.css name --color-neutral-01 … -11 and --color-accent-01
+   … -05 outright, so a shorter ramp is resampled rather than left with holes. */
+const fit = (list, n) => list.length === n ? list : Array.from({ length: n }, (_, i) => list[Math.round(i * (list.length - 1) / (n - 1))]);
 const trimOf = list => list[Math.min(TRIM, list.length - 1)];
 
 function applyTheme(el, theme) {
@@ -137,9 +153,9 @@ function applyTheme(el, theme) {
   const surf = ramps[t.surface], acc = ramps[t.accent], acc2 = ramps['accent-2'] || acc;
   const ink = surf[surf.length - 1], dark = relLum(hexRgb(surf[0])) < 128;
   for (const k of Object.keys(ramps)) setRamp(el, k, ramps[k]);
-  setRamp(el, 'neutral', surf);
-  setRamp(el, 'accent', acc);
-  setRamp(el, 'accent-2', acc2);
+  setRamp(el, 'neutral', fit(surf, SURFACE_SHADES));
+  setRamp(el, 'accent', fit(acc, COLOUR_SHADES));
+  setRamp(el, 'accent-2', fit(acc2, COLOUR_SHADES));
   const set = (k, v) => el.style.setProperty(k, v);
   set('--color-accent', trimOf(acc));
   set('--color-accent-2', trimOf(acc2));
@@ -174,6 +190,7 @@ function gltfLoader() {
 const TYPES = {
   title:     { w: 860,  h: 500, place: 'side', frac: 0.52, label: 'Title', hint: 'Cover slide: big heading, key figures.' },
   section:   { w: 760,  h: 440, place: 'center', label: 'Section', hint: 'Divider with a big number.' },
+  chapters:  { w: 780,  h: 520, place: 'side', frac: 0.48, label: 'Chapters', hint: 'Agenda: a list of chapters, each able to jump to its step.' },
   card:      { w: 640,  h: 440, place: 'side', frac: 0.44, label: 'Card', hint: 'Text, optional image and specs.' },
   split:     { w: 920,  h: 480, place: 'side', frac: 0.58, label: 'Two columns', hint: 'Two text columns, image or specs on the right.' },
   callout:   { w: 600,  h: 300, place: 'pin', label: 'Callout', hint: 'Compact note pinned to a part.' },
@@ -190,12 +207,48 @@ const TYPES = {
   end:       { w: 760,  h: 440, place: 'center', label: 'End', hint: 'Closing slide.' },
 };
 const typeOf = s => TYPES[s && s.type] ? s.type : 'card';
+/* A slide's own box, in design pixels, and where its content sits in it. The
+   type gives the default shape; a step may pick its own width and height, or
+   ask the height to follow the content — the one case layout() has to measure
+   the slide rather than assume it. All unset means the type's own box, so an
+   old deck is unchanged. */
+const sizeOf = (s, t) => ({
+  w: clamp(+s.slideW || t.w, 240, 2000),
+  h: +s.slideH ? clamp(+s.slideH, 120, 1600) : s.fitH ? 0 : t.h,
+  fit: !!s.fitH,
+});
+// Where the content sits when the slide is taller than it needs to be.
+const JUSTIFY = { top: 'flex-start', middle: 'center', bottom: 'flex-end', spread: 'space-between' };
 
 /* A part is a name for some meshes; a group is a name for some parts. A mesh
    answers to its own part name and to every group that holds it, so focus,
    highlight, hide, colours and labels take either without knowing which. */
 const tagsOf = (part, groups) => part ? [part, ...Object.keys(groups || {}).filter(g => toList(groups[g]).includes(part))] : [];
 const tagged = (o, names) => o.tags.some(t => names.includes(t));
+// A mesh's part: the one the loader gave it (one STL = one part), else the first
+// part whose substrings appear in its own node name or an ancestor's.
+function partOf(o, parts, keys) {
+  if (o.userData.part) return o.userData.part;
+  let names = ''; for (let p = o; p; p = p.parent) names += ' ' + (p.name || '').toLowerCase();
+  return keys.find(key => toList(parts[key]).some(sub => String(sub) && names.includes(String(sub).toLowerCase()))) || null;
+}
+// What a re-tag depends on: everything about a model that is a name, a list or
+// a colour rather than geometry.
+const tagKeyOf = m => JSON.stringify(m ? [m.parts || 0, m.groups || 0, m.materials || 0] : null);
+/* A part's base material, as the deck's override on top of the values the mesh
+   arrived with. Both are written every time, so clearing an override restores
+   the file's own material instead of needing the file parsed again. */
+function applyBaseMat(mt, mo, mat0) {
+  if (mt.color && mat0.color != null) mt.color.setHex(mat0.color);
+  if (mat0.metalness !== undefined) mt.metalness = mat0.metalness;
+  if (mat0.roughness !== undefined) mt.roughness = mat0.roughness;
+  mt.opacity = mat0.opacity;
+  if (!mo) return;
+  if (mo.color && mt.color) mt.color.set(mo.color);
+  if (mo.metalness !== undefined) mt.metalness = mo.metalness;
+  if (mo.roughness !== undefined) mt.roughness = mo.roughness;
+  if (mo.opacity !== undefined) mt.opacity = mo.opacity;
+}
 
 /* Stress colours: the scale every FEA post-processor uses, cold blue to hot
    red. Built through T.Color so it lands in the renderer's working colour
@@ -220,7 +273,58 @@ function specsTable(s) {
   return rows.length ? '<table class="sl-specs">' + rows.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('') + '</table>' : '';
 }
 function figure(src, s, cls) {
-  return src ? '<figure class="blueprint ' + (cls || '') + '">' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '"></figure>' : '';
+  return src ? '<figure class="blueprint ' + (cls || '') + '"' + figVars(s) + '>' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '"></figure>' : '';
+}
+/* Where a picture sits in its slide, as the three variables deck.css reads for
+   every figure: height in px, width as a share of the column, and which edge it
+   lines up with. Unset means the type's own default, so an old deck is unchanged. */
+function figVars(s) {
+  const v = [];
+  // Two ways to size it: a fixed height, or an aspect ratio that lets the width decide.
+  // A ratio wins, and takes the height and the flex-grow out of the way to do it.
+  const ar = ratioOf(s.imageRatio);
+  if (ar) v.push('--fig-ar:' + ar, '--fig-h:auto', '--fig-flex:none');
+  else if (+s.imageH) v.push('--fig-h:' + clamp(+s.imageH, 40, 1200) + 'px');
+  if (+s.imageW && +s.imageW < 100) v.push('--fig-w:' + clamp(+s.imageW, 10, 100) + '%');
+  const al = { left: 'flex-start', center: 'center', right: 'flex-end' }[s.imageAlign];
+  if (al) v.push('--fig-al:' + al);
+  if (['cover', 'contain', 'fill'].includes(s.fit)) v.push('--fig-fit:' + s.fit);
+  return v.length ? ' style="' + v.join(';') + '"' : '';
+}
+// "16/9", "16:9" or "1.78" \u2192 a CSS aspect-ratio; anything else is no ratio at all.
+function ratioOf(r) {
+  const m = /^\s*([\d.]+)\s*(?:[/:]\s*([\d.]+)\s*)?$/.exec(String(r ?? ''));
+  if (!m || !(+m[1] > 0) || (m[2] !== undefined && !(+m[2] > 0))) return null;
+  return m[2] === undefined ? String(+m[1]) : +m[1] + '/' + +m[2];
+}
+/* A step may point at another step. The target is held by id, not by index, so
+   moving or inserting steps cannot silently re-aim a button; a numeric ref is
+   still read as an index, which is what an older deck or a hand-edited JSON has. */
+/* Already there. Two steps can differ only in their slide — same focus, same
+   view, same rotation — and flying between them is not a shorter flight, it is
+   a pointless one: the arc's radius bump has a floor, so the camera dollies out
+   and back over the whole flightSeconds, with the controls disabled while it
+   does. Position and target say it on their own; the spherical pair the flight
+   interpolates in cannot differ if these do not. */
+function sameView(cam, ctl, view, sx, sy) {
+  const eps = Math.max(cam.position.distanceTo(ctl.target), 1) * 1e-4;
+  return cam.position.distanceTo(view.pos) < eps && ctl.target.distanceTo(view.target) < eps
+    && Math.abs((view.sx || 0) - sx) < 1e-4 && Math.abs((view.sy || 0) - sy) < 1e-4;
+}
+function stepIndexOf(steps, ref) {
+  if (ref == null || ref === '') return -1;
+  const byId = steps.findIndex(st => st && st.id && st.id === ref);
+  if (byId >= 0) return byId;
+  const n = +ref;
+  return Number.isInteger(n) && n >= 0 && n < steps.length ? n : -1;
+}
+function linksHtml(s, steps) {
+  const out = toList(s.links).map(l => {
+    const j = l && stepIndexOf(steps, l.to);
+    if (!(j >= 0)) return '';   // a link to a deleted step is dropped, not drawn dead
+    return '<a class="sl-jump" data-goto="' + j + '" title="Go to step ' + pad(j + 1) + '">' + esc(l.label || steps[j].title || 'Step ' + pad(j + 1)) + '</a>';
+  }).join('');
+  return out ? '<div class="sl-links">' + out + '</div>' : '';
 }
 const body = (html, cls) => html ? '<div class="sl-body' + (cls ? ' ' + cls : '') + '">' + html + '</div>' : '';
 const isNum = v => /^[\s\-+−±~≈<>]*[\d.,]+\s*[%a-zA-Zµ°·/²³]*\s*$/.test(String(v ?? ''));
@@ -235,14 +339,28 @@ const RENDER = {
   section(s, x) {
     return CORNERS + x.head('on-dark') + '<div class="sl-bignum">' + esc(s.number ?? pad(x.i + 1)) + '</div><h2>' + esc(s.title) + '</h2>' + body(s.body);
   },
+  /* An agenda. Each row may point at a step, and does it through the same
+     id-keyed link plumbing as a jump button, so inserting steps cannot re-aim it. */
+  chapters(s, x) {
+    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' + body(s.body) +
+      '<ol class="sl-chap">' + toList(s.chapters).map((c, j) => {
+        const k = stepIndexOf(x.steps, c.to);
+        const inner = '<span class="n">' + esc(c.number ?? pad(j + 1)) + '</span><b>' + esc(c.title) + '</b>' +
+          (c.note ? '<span class="note">' + esc(c.note) + '</span>' : '');
+        return '<li class="st-' + esc(c.status || 'next') + '">' +
+          (k >= 0 ? '<a data-goto="' + k + '">' + inner + '</a>' : '<span>' + inner + '</span>') + '</li>';
+      }).join('') + '</ol>';
+  },
   end(s, x) {
     return CORNERS + x.head('on-dark') + '<h1>' + esc(s.title || 'Questions') + '</h1>' + body(s.body);
   },
   card(s, x) {
-    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' + body(s.body) + figure(x.url(s.image), s, 'sl-fig') + specsTable(s);
+    const fig = figure(x.url(s.image), s, 'sl-fig');
+    return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' + (s.imageTop ? fig + body(s.body) : body(s.body) + fig) + specsTable(s);
   },
   split(s, x) {
-    const right = body(s.body2) + figure(x.url(s.image), s, 'sl-fig') + specsTable(s);
+    const fig = figure(x.url(s.image), s, 'sl-fig');
+    const right = (s.imageTop ? fig + body(s.body2) : body(s.body2) + fig) + specsTable(s);
     return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2><div class="sl-cols"><div>' + body(s.body) + '</div><div>' + right + '</div></div>';
   },
   metrics(s, x) {
@@ -282,7 +400,7 @@ const RENDER = {
   image(s, x) {
     const src = x.url(s.image);
     return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' +
-      (src ? '<figure class="blueprint sl-bigfig">' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '" style="object-fit:' + (s.fit === 'cover' ? 'cover' : 'contain') + '"></figure>'
+      (src ? '<figure class="blueprint sl-bigfig"' + figVars(s) + '>' + CORNERS + '<img src="' + esc(src) + '" alt="' + esc(s.imageAlt) + '"></figure>'
         : '<div class="sl-bigfig sl-empty">No image</div>') + body(s.body, 'sl-cap');
   },
   /* Slides are real DOM, so a <video> here is a real video element: it plays in
@@ -291,7 +409,7 @@ const RENDER = {
     const src = x.url(s.video);
     const att = (s.controls === false ? '' : ' controls') + (s.loop === false ? '' : ' loop') + (s.sound ? '' : ' muted');
     return CORNERS + x.head() + '<h2>' + esc(s.title) + '</h2>' +
-      (src ? '<figure class="blueprint sl-bigfig sl-vid">' + CORNERS + '<video src="' + esc(src) + '"' + att + ' playsinline preload="metadata" style="object-fit:' + (s.fit === 'cover' ? 'cover' : 'contain') + '"></video></figure>'
+      (src ? '<figure class="blueprint sl-bigfig sl-vid"' + figVars(s) + '>' + CORNERS + '<video src="' + esc(src) + '"' + att + ' playsinline preload="metadata"></video></figure>'
         : '<div class="sl-bigfig sl-empty">No video</div>') + body(s.body, 'sl-cap');
   },
   timeline(s, x) {
@@ -402,6 +520,9 @@ class DeckEngine {
     };
     window.addEventListener('keydown', this.onKey);
     this.ro = new ResizeObserver(() => this.resize()); this.ro.observe(host);
+    // A slide whose height follows its content is measured, and text measured in
+    // a fallback font is the wrong height. Lay out again once the real one lands.
+    if (document.fonts) document.fonts.ready.then(() => { if (!this.dead && this.slides.length) this.layout(); });
     this.last = performance.now();
     const loop = now => { if (this.dead) return; this.raf = requestAnimationFrame(loop); this.tick(now); };
     this.raf = requestAnimationFrame(loop);
@@ -436,9 +557,13 @@ class DeckEngine {
     if (this.renderer.getPixelRatio() !== px) this.renderer.setPixelRatio(px);
     this.theme = applyTheme(this.themeRoot, cfg.theme);
     this.themeMeshes();
-    // `fields` are baked results, not geometry: editing one must not reload the model.
-    const key = JSON.stringify(cfg.model ? Object.assign({}, cfg.model, { fields: 0 }) : null);
+    /* Only geometry belongs in the reload key. `fields` are baked results;
+       parts, groups and materials are names, lists and colours — all of them are
+       re-applied to the meshes in place, so none may cost a model reload. */
+    const key = JSON.stringify(cfg.model ? Object.assign({}, cfg.model, { fields: 0, parts: 0, groups: 0, materials: 0 }) : null);
+    const tagKey = tagKeyOf(cfg.model);
     if (key !== this.modelKey) { this.modelKey = key; this.loadModelFromConfig(cfg.model || null); }
+    else if (tagKey !== this.tagKey) { this.tagKey = tagKey; this.retagMeshes(cfg.model); }
     this.buildSlides();
     this.layout();
     const n = this.slides.length;
@@ -482,8 +607,13 @@ class DeckEngine {
     const steps = this.cfg.steps, n = steps.length;
     this.slides = steps.map((s, i) => {
       const type = typeOf(s), t = TYPES[type], parts = [];
-      const x = { i, n, head: cls => head(s, i, n, cls), url: r => this.assetUrl(r) };
-      const click = () => { this.opts.onSlideClick && this.opts.onSlideClick(i); if (this.state.overview || this.state.current !== i) this.goTo(i); };
+      const x = { i, n, steps, head: cls => head(s, i, n, cls), url: r => this.assetUrl(r) };
+      const click = e => {
+        const a = e && e.target && e.target.closest && e.target.closest('[data-goto]');
+        // A jump reports the step it lands on, so the editor's selection follows it too.
+        if (a) { e.preventDefault(); e.stopPropagation(); const j = +a.dataset.goto; this.opts.onSlideClick && this.opts.onSlideClick(j); this.goTo(j); return; }
+        this.opts.onSlideClick && this.opts.onSlideClick(i); if (this.state.overview || this.state.current !== i) this.goTo(i);
+      };
       if (type === 'labels') {
         for (const lab of toList(s.labels)) {
           const el = pinEl(t.w, t.h, '<b>' + esc(lab.text) + '</b>' + (lab.note ? '<span>' + esc(lab.note) + '</span>' : ''), 'sl-label');
@@ -492,7 +622,7 @@ class DeckEngine {
           parts.push({ el, wrap: wrapSlide(el, t.w), hit: el.hit, label: lab });
         }
       } else if (type === 'callout') {
-        const el = pinEl(t.w, t.h, x.head() + '<h3>' + esc(s.title) + '</h3>' + body(s.body) + specsTable(s), 'sl-callout');
+        const el = pinEl(t.w, t.h, x.head() + '<h3>' + esc(s.title) + '</h3>' + body(s.body) + specsTable(s) + linksHtml(s, steps), 'sl-callout');
         this.slideAccent(el, s);
         el.hit.addEventListener('click', click);
         parts.push({ el, wrap: wrapSlide(el, t.w), hit: el.hit });
@@ -500,10 +630,15 @@ class DeckEngine {
         const el = document.createElement('div');
         el.className = 'blueprint sl sl-' + type;
         this.slideAccent(el, s);
-        el.style.width = t.w + 'px'; el.style.minHeight = t.h + 'px';
-        el.innerHTML = RENDER[type](s, x);
+        const box = sizeOf(s, t);
+        el.style.width = box.w + 'px'; el.style.minHeight = box.h + 'px';
+        // Several types push their last block down with margin-top:auto, which
+        // eats the free space before justify-content ever sees it. Placing the
+        // content by hand means giving that space back.
+        if (JUSTIFY[s.vAlign]) { el.style.setProperty('--sl-just', JUSTIFY[s.vAlign]); el.style.setProperty('--sl-auto', '0'); }
+        el.innerHTML = RENDER[type](s, x) + linksHtml(s, steps);
         el.addEventListener('click', click);
-        parts.push({ el, wrap: wrapSlide(el, t.w) });
+        parts.push({ el, wrap: wrapSlide(el, box.w) });
       }
       const layer = s.behind ? this.cssSceneBack : this.cssScene;
       // CSS3DObject's constructor sets pointerEvents:auto inline, which outranks
@@ -553,6 +688,30 @@ class DeckEngine {
   }
   partCenter(name, ex) { const b = this.partBox([name], ex); return b.isEmpty() ? null : b.getCenter(new T.Vector3()); }
   parts() { return [...new Set(this.meshes.map(o => o.part).filter(Boolean))]; }
+
+  /* Re-derive part names, groups and base materials on the meshes already
+     loaded. Naming a part used to go through the reload key, so every keystroke
+     in the editor re-parsed the model and re-smoothed it; none of these three
+     touches geometry. onModel only fires if the part list actually moved, so an
+     edit the UI need not redraw for does not redraw it. */
+  retagMeshes(m, quiet) {
+    if (!this.meshes.length) return;
+    m = m || {};
+    const parts = m.parts || {}, keys = Object.keys(parts), groups = m.groups || {}, mats = m.materials || {};
+    for (const o of this.meshes) {
+      o.part = partOf(o.m, parts, keys);
+      o.tags = tagsOf(o.part, groups);
+      applyBaseMat(o.m.material, o.tags.reduce((v, t) => v ?? mats[t], undefined) || mats['*'], o.mat0);
+      o.baseOp = o.m.material.opacity ?? 1;
+      o.base = null;                                  // applyColors caches the restore colour, and it just changed
+    }
+    this.applyColors(((this.cfg.steps || [])[this.state.current] || {}).colors);
+    if (quiet) return;                                // swapIn reports the whole model itself, a line later
+    const was = (this.modelInfo && this.modelInfo.parts || []).join('\n'), now = this.parts();
+    if (now.join('\n') === was) return;
+    this.modelInfo = Object.assign({}, this.modelInfo, { parts: now });
+    this.opts.onModel && this.opts.onModel(this.modelInfo);
+  }
 
   // Camera view for a step. With "focus", the orbit pivot is the centre of those parts, the distance fits
   // them, and the projection is shifted so the pivot sits in the free part of the screen.
@@ -617,6 +776,11 @@ class DeckEngine {
         zoomSlide(wrap, zoomFor(wW / (2 * Math.max(d, 1e-3) * tanH) * H / w));
         obj.position.copy(p); obj.up.copy(u); obj.lookAt(p.clone().sub(f)); obj.scale.setScalar(wW / (w * wrap.zoomK));
       };
+      /* Per-step placement, on top of whatever the type does by itself: `size`
+         scales the slide's share of the view, `dx`/`dy` nudge it across and up
+         in percent of the visible frame. Both default to the type's own layout,
+         so a deck that sets neither looks exactly as it did. */
+      const k = clamp(+s.size || 1, 0.4, 2.5), dxp = (+s.dx || 0) / 100, dyp = (+s.dy || 0) / 100;
       if (t.place === 'labels' || t.place === 'pin') {
         for (const p of sl.parts) {
           let anchor = target.clone(), left = side === 'left';
@@ -627,24 +791,31 @@ class DeckEngine {
             left = p.label.side ? p.label.side === 'left' : anchor.clone().sub(target).dot(r) < -1e-3;
           }
           const depth = Math.max(0.5, anchor.clone().sub(pos).dot(f));
-          const hW = 2 * depth * tanH * (p.label ? 0.17 : 0.34), wW = hW * t.w / t.h;
+          const vH = 2 * depth * tanH, hW = vH * (p.label ? 0.17 : 0.34) * k, wW = hW * t.w / t.h;
           setPinSide(p.el, left);
-          place(p.obj, anchor.clone().addScaledVector(r, (left ? -1 : 1) * wW / 2).addScaledVector(u, hW / 2), wW, t.w, p.wrap, depth);
+          place(p.obj, anchor.clone().addScaledVector(r, (left ? -1 : 1) * wW / 2 + dxp * vH * aspect).addScaledVector(u, hW / 2 + dyp * vH), wW, t.w, p.wrap, depth);
         }
         continue;
       }
-      const ratio = t.w / t.h, ds = D * 0.5, visH = 2 * ds * tanH, visW = visH * aspect;
+      /* The slide's design box drives the on-screen one. A slide set to fit its
+         content has no design height to drive it, so measure the height it
+         actually has: as a share of its own width, which the element's zoom
+         cancels out of and a raw offsetHeight would not. */
+      const b = sizeOf(s, t), el0 = sl.parts[0].el;
+      const designH = b.fit && el0.offsetWidth ? el0.offsetHeight / el0.offsetWidth * b.w : (b.h || t.h);
+      const ratio = b.w / Math.max(designH, 1), ds = D * 0.5, visH = 2 * ds * tanH, visW = visH * aspect;
       let hW, offX = 0, offY = 0;
-      if (t.place === 'center') hW = Math.min(visH * 0.66, visW * 0.8 / ratio);
-      else if (side === 'center') { hW = Math.min(visH * 0.62, visW * 0.88 / ratio); offY = visH * 0.12; }
-      else if (side === 'bottom') { hW = Math.min(visH * 0.4, visW * 0.86 / ratio); offY = -(visH / 2 - hW / 2 - visH * 0.135); }
+      if (t.place === 'center') hW = Math.min(visH * 0.66, visW * 0.8 / ratio) * k;
+      else if (side === 'center') { hW = Math.min(visH * 0.62, visW * 0.88 / ratio) * k; offY = visH * 0.12; }
+      else if (side === 'bottom') { hW = Math.min(visH * 0.4, visW * 0.86 / ratio) * k; offY = -(visH / 2 - hW / 2 - visH * 0.135); }
       else {
         const frac = t.frac || 0.44;
-        hW = Math.min(visH * (frac > 0.5 ? 0.8 : 0.72), visW * frac / ratio);
+        hW = Math.min(visH * (frac > 0.5 ? 0.8 : 0.72), visW * frac / ratio) * k;
         offX = (visW / 2 - hW * ratio / 2 - visW * 0.05) * (side === 'left' ? -1 : 1); offY = -visH * 0.02;
       }
+      offX += dxp * visW; offY += dyp * visH;
       offX -= sx * visW; offY -= sy * visH; // cancel the projection shift so the slide stays put on screen
-      place(sl.parts[0].obj, pos.clone().addScaledVector(f, ds).addScaledVector(r, offX).addScaledVector(u, offY), hW * ratio, t.w, sl.parts[0].wrap, ds);
+      place(sl.parts[0].obj, pos.clone().addScaledVector(f, ds).addScaledVector(r, offX).addScaledVector(u, offY), hW * ratio, b.w, sl.parts[0].wrap, ds);
     }
     // back to the step on screen, not to whichever slide the loop ended on
     const cur = this.slides[this.state.current];
@@ -667,7 +838,7 @@ class DeckEngine {
   fly(view, instant) {
     if (!view) return;
     const cam = this.camera, ctl = this.controls;
-    if (instant) {
+    if (instant || sameView(cam, ctl, view, this.sx || 0, this.sy || 0)) {
       cam.position.copy(view.pos); ctl.target.copy(view.target); cam.lookAt(view.target); this.setShift(view.sx || 0, view.sy || 0);
       this.flight = null; ctl.enabled = true; return;
     }
@@ -983,6 +1154,12 @@ class DeckEngine {
     this.measure();
     this.explode.cur = this.explode.last = 0;
     this.cut.cur = this.cut.target = 1e6;
+    /* A load takes seconds on a dense model and the names can be edited while it
+       runs, so the config is the truth here, not the copy the load started from.
+       Setting tagKey only once the meshes exist is also what stops an edit made
+       mid-load from being counted as already applied. */
+    this.tagKey = tagKeyOf(this.cfg && this.cfg.model);
+    if (meshes.length) this.retagMeshes(this.cfg && this.cfg.model, true);
     this.modelInfo = { kind: info.kind, parts: this.parts(), nodes: info.nodes || [], meshes: meshes.length, triangles: Math.round(tris) };
     this.themeMeshes();
     if (this.slides.length) {
@@ -1040,8 +1217,7 @@ class DeckEngine {
       if (!o.isMesh) return;
       o.material = (Array.isArray(o.material) ? o.material[0] : o.material).clone(); o.material.transparent = true; o.material.side = T.DoubleSide;
       if (o.material.emissive && !o.material.emissiveMap) { o.material.emissive = new T.Color('#5980a6'); o.material.emissiveIntensity = 0; }
-      let names = ''; for (let p = o; p; p = p.parent) names += ' ' + (p.name || '').toLowerCase();
-      const part = o.userData.part || keys.find(key => toList(parts[key]).some(sub => String(sub) && names.includes(String(sub).toLowerCase()))) || null;
+      const part = partOf(o, parts, keys);
       let e = null;
       const tris = (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
       // Edge extraction is the slowest step on dense CAD meshes; skip it above a triangle budget unless forced.
@@ -1052,14 +1228,9 @@ class DeckEngine {
       // ponytail: whole-mesh, no triangle budget — it is opt-in and off by default.
       if (m.smooth) o.geometry = toCreasedNormals(o.geometry, (+m.smooth) * Math.PI / 180);
       const tags = tagsOf(part, groups);
-      const mo = tags.reduce((v, t) => v ?? (m.materials || {})[t], undefined) || (m.materials || {})['*'];
-      if (mo) {
-        if (mo.color && o.material.color) o.material.color.set(mo.color);
-        if (mo.metalness !== undefined) o.material.metalness = mo.metalness;
-        if (mo.roughness !== undefined) o.material.roughness = mo.roughness;
-        if (mo.opacity !== undefined) o.material.opacity = mo.opacity;
-      }
-      list.push({ m: o, e, part, tags, baseOp: o.material.opacity ?? 1, baseEdge: 0.4 });
+      const mat0 = { color: o.material.color ? o.material.color.getHex() : null, metalness: o.material.metalness, roughness: o.material.roughness, opacity: o.material.opacity ?? 1 };
+      applyBaseMat(o.material, tags.reduce((v, t) => v ?? (m.materials || {})[t], undefined) || (m.materials || {})['*'], mat0);
+      list.push({ m: o, e, part, tags, mat0, baseOp: o.material.opacity ?? 1, baseEdge: 0.4 });
     });
     return [g, list, nodes];
   }
@@ -1069,5 +1240,9 @@ window.DeckEngine = DeckEngine;
 window.DeckEngine.TYPES = TYPES;
 window.DeckEngine.esc = esc;
 window.DeckEngine.groups = { tagsOf, tagged };
-window.DeckEngine.theme = { ramp, themeOf, applyTheme, addRole, roleKey, defaults: THEME, surfaceShades: SURFACE_SHADES, colourShades: COLOUR_SHADES };
+window.DeckEngine.links = { stepIndexOf, linksHtml };
+window.DeckEngine.figure = { figVars, ratioOf };
+window.DeckEngine.box = { sizeOf, JUSTIFY };
+window.DeckEngine.flight = { sameView };
+window.DeckEngine.theme = { ramp, themeOf, applyTheme, addRole, roleKey, defaults: THEME, surfaceShades: SURFACE_SHADES, colourShades: COLOUR_SHADES, minShades: MIN_SHADES, maxShades: MAX_SHADES };
 })();

@@ -193,7 +193,8 @@ function addStep(type) {
   changed({ now: true });
   setTimeout(() => select(at), 160);
 }
-function dupStep(i) { ED.deck.steps.splice(i + 1, 0, clone(ED.deck.steps[i])); changed({ now: true }); setTimeout(() => select(i + 1), 160); }
+// The copy gets no id: an id is what a link points at, and two steps answering to one would aim it at the wrong slide.
+function dupStep(i) { const c = clone(ED.deck.steps[i]); delete c.id; ED.deck.steps.splice(i + 1, 0, c); changed({ now: true }); setTimeout(() => select(i + 1), 160); }
 function delStep(i) {
   if (ED.deck.steps.length <= 1) { toast('A deck needs at least one step.', true); return; }
   ED.deck.steps.splice(i, 1);
@@ -494,16 +495,39 @@ function mediaField(s, key, kind = 'image') {
   return box;
 }
 
-// ---------- inspector ----------
+/* ---------- inspector ----------
+   Every edit redraws the whole pane, which is simple and fast but throws away
+   where the user was: the caret, the selection, the scroll. So the position is
+   taken as a path of child indices before the rebuild and walked back after it.
+   Without this, anything that re-renders mid-typing (a part name, a colour
+   name) drops focus after one keystroke and the pane jumps. */
+function focusMark(root) {
+  const el = document.activeElement;
+  if (!el || el === root || !root.contains(el)) return null;
+  const path = [];
+  for (let n = el; n && n !== root && n.parentNode; n = n.parentNode) path.unshift([...n.parentNode.children].indexOf(n));
+  let sel = null;
+  try { if (el.selectionStart != null) sel = [el.selectionStart, el.selectionEnd]; } catch (e) { }   // number inputs throw
+  return { path, sel, tag: el.tagName, scroll: el.scrollTop };
+}
+function focusRestore(root, mk) {
+  if (!mk) return;
+  let n = root;
+  for (const i of mk.path) { n = n && n.children[i]; if (!n) return; }
+  if (n.tagName !== mk.tag) return;
+  n.focus({ preventScroll: true });
+  if (mk.sel) try { n.setSelectionRange(mk.sel[0], mk.sel[1]); } catch (e) { }
+  n.scrollTop = mk.scroll;
+}
 function renderInspector() {
-  const pane = $('insp'), sc = pane.scrollTop, keep = pane.dataset.for === String(ED.sel);
+  const pane = $('insp'), sc = pane.scrollTop, keep = pane.dataset.for === String(ED.sel), mk = keep ? focusMark(pane) : null;
   pane.innerHTML = ''; pane.dataset.for = String(ED.sel);
   // Rendering may add empty containers (specs: [], view: {}); that isn't an edit, so don't let it count as one.
   const before = snap();
   if (ED.sel < 0) renderDeckInspector(pane); else renderStepInspector(pane, step(), ED.sel);
   const after = snap();
   if (after !== before) { if (ED.cur === before) ED.cur = after; if (ED.savedSnap === before) ED.savedSnap = after; updateDirty(); }
-  if (keep) pane.scrollTop = sc;
+  if (keep) { pane.scrollTop = sc; focusRestore(pane, mk); }
 }
 
 function renderStepInspector(pane, s, i) {
@@ -529,6 +553,21 @@ function renderStepInspector(pane, s, i) {
   } else if (T.place === 'pin') {
     lay.append(field('Callout points', seg([['right', 'Box right of part'], ['left', 'Box left of part']], s.side === 'left' ? 'left' : 'right', v => { s.side = v; changed({ now: true }); })));
   }
+  // Size, shape and nudge, on top of whatever the type does by itself.
+  const shaped = T.place !== 'pin' && T.place !== 'labels';   // a pin box is sized by its leader line, not by a design box
+  lay.append(h('details', null, h('summary', { class: 'in-hint', style: 'cursor:pointer' }, shaped ? 'Size, shape and position' : 'Size and position'),
+    h('div', { style: 'display:flex;flex-direction:column;gap:8px;margin-top:8px' },
+      range('Slide size', +s.size || 1, 0.4, 2, 0.05, x => Math.round(x * 100) + ' %', x => { setOrDel(s, 'size', x === 1 ? null : x); changed(); }),
+      row(2, field('Move across %', num(s, 'dx', { step: 1, ph: '0' })), field('Move up %', num(s, 'dy', { step: 1, ph: '0' }))),
+      hint('Size is the share of the frame the slide takes. Move is in percent of the visible frame, from wherever the type puts it \u2014 negative goes left and down.'),
+      ...(shaped ? [
+        row(2, field('Slide width', num(s, 'slideW', { step: 20, min: 240, max: 2000, ph: T.w + ' px' })),
+          field('Slide height', num(s, 'slideH', { step: 20, min: 120, max: 1600, ph: s.fitH ? 'content' : T.h + ' px' }))),
+        check('Height follows the content', !!s.fitH, v => { setOrDel(s, 'fitH', v || null); changed({ now: true }); renderInspector(); }),
+        field('Content sits', seg([['', 'Type default'], ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom'], ['spread', 'Spread']], s.vAlign || '',
+          v => { setOrDel(s, 'vAlign', v || null); changed({ now: true }); })),
+        hint('Width and height are the slide\u2019s design box: its shape, and how much text fits on a line. The frame scales it to fit either way, so a narrower box means bigger text, not a smaller slide. <b>Height follows the content</b> drops the empty space under a short slide \u2014 a height set alongside it becomes the minimum.'),
+      ] : []))));
   pane.append(lay);
 
   // Content
@@ -536,13 +575,21 @@ function renderStepInspector(pane, s, i) {
   const k = () => field('Kicker', txt(s, 'kicker', 'Small line above the title'));
   const t = (ph) => field('Title', txt(s, 'title', ph || 'Title'));
   const b = (label, key = 'body', rows = 4) => field(label || 'Body (HTML allowed)', area(s, key, '', { html: true, rows }));
+  // Card and split read better either way round, so the image can lead the text.
+  const imgTop = label => check(label, !!s.imageTop, v => { setOrDel(s, 'imageTop', v || null); changed({ now: true }); });
   const specs = (label) => field(label || 'Specs (label / value)', rowsEditor(s.specs || (s.specs = []), (r, j, acts) => [txt(r, 0, 'Label', { keep: true }), txt(r, 1, 'Value', { keep: true }), acts], () => ['', ''], '+ Row', { cols: '1fr 1fr auto' }));
   switch (type) {
     case 'title': c.append(k(), t(), b('Intro'), specs('Key figures (shown as a row)')); break;
     case 'section': c.append(k(), row(2, field('Big number', txt(s, 'number', pad(i + 1))), h('span')), t(), b('Subtitle', 'body', 2)); break;
+    case 'chapters':
+      c.append(k(), t(), b('Intro (optional)', 'body', 2), field('Chapters', rowsEditor(s.chapters || (s.chapters = []), (ch, j, acts) => [
+        row(2, txt(ch, 'title', 'Chapter title'), dropdown([['next', 'Upcoming'], ['current', 'Current'], ['done', 'Done']], ch.status || 'next', v => { ch.status = v; changed(); })),
+        row(2, txt(ch, 'note', 'Note (optional)'), dropdown(stepOptions(i), stepRefValue(ch), v => setStepRef(ch, v))), acts],
+        () => ({ title: 'Chapter', status: 'next' }), '+ Chapter', { max: 10 })),
+        hint('Pick a step and the chapter becomes a button that jumps there, held by id so inserting steps cannot re-aim it. <b>Current</b> marks where you are.')); break;
     case 'end': c.append(k(), t('Questions'), b('Line under the title', 'body', 2)); break;
-    case 'card': c.append(k(), t(), b(), field('Image', imageField(s, 'image')), specs()); break;
-    case 'split': c.append(k(), t(), b('Left column'), b('Right column', 'body2'), field('Image (right column)', imageField(s, 'image')), specs('Specs (right column)')); break;
+    case 'card': c.append(k(), t(), b(), field('Image', imageField(s, 'image')), ...figFields(s, 180, 'cover'), imgTop('Image above the text'), specs()); break;
+    case 'split': c.append(k(), t(), b('Left column'), b('Right column', 'body2'), field('Image (right column)', imageField(s, 'image')), ...figFields(s, 180, 'cover'), imgTop('Image above the right column'), specs('Specs (right column)')); break;
     case 'callout':
       if (!toList(s.focus).length) c.append(h('p', { class: 'in-warn' }, 'A callout points at its focus part. Pick one under 3D → Focus.'));
       c.append(k(), t(), b('Body', 'body', 3), specs()); break;
@@ -565,17 +612,15 @@ function renderStepInspector(pane, s, i) {
       c.append(k(), t(), row(2, field('Language label', txt(s, 'lang', 'python')), h('span')), field('Code', area(s, 'code', '', { code: true, keep: true, rows: 10 })), b('Caption', 'body', 2)); break;
     case 'image':
       c.append(k(), t(), field('Image', imageField(s, 'image')), field('Alt text', txt(s, 'imageAlt', 'Describe the image')),
-        field('Fit', seg([['contain', 'Whole image'], ['cover', 'Fill frame']], s.fit === 'cover' ? 'cover' : 'contain', v => { s.fit = v; changed(); })),
-        b('Caption', 'body', 2)); break;
+        ...figFields(s, 360, 'contain'), b('Caption', 'body', 2)); break;
     case 'video':
       c.append(k(), t(), field('Video file', mediaField(s, 'video', 'video')),
-        row(2, field('Fit', seg([['contain', 'Whole frame'], ['cover', 'Fill frame']], s.fit === 'cover' ? 'cover' : 'contain', v => { s.fit = v; changed(); })),
-          field('Playback', h('div', { style: 'display:flex;gap:14px;flex-wrap:wrap' },
+        field('Playback', h('div', { style: 'display:flex;gap:14px;flex-wrap:wrap' },
             check('Autoplay', s.autoplay !== false, v => { setOrDel(s, 'autoplay', v ? null : false); changed({ now: true }); }),
             check('Loop', s.loop !== false, v => { setOrDel(s, 'loop', v ? null : false); changed({ now: true }); }),
             check('Sound', !!s.sound, v => { setOrDel(s, 'sound', v || null); changed({ now: true }); }),
-            check('Controls', s.controls !== false, v => { setOrDel(s, 'controls', v ? null : false); changed({ now: true }); })))),
-        b('Caption', 'body', 2));
+            check('Controls', s.controls !== false, v => { setOrDel(s, 'controls', v ? null : false); changed({ now: true }); }))),
+        ...figFields(s, 380, 'contain'), b('Caption', 'body', 2));
       if (s.sound && s.autoplay !== false) c.append(hint('Browsers block autoplay with sound until the page has been clicked, so the video may wait for a click on this step.'));
       break;
     case 'timeline':
@@ -585,8 +630,39 @@ function renderStepInspector(pane, s, i) {
     case 'caption': c.append(k(), t(), b('Caption', 'body', 2)); break;
   }
   pane.append(c);
+  if (T.place !== 'labels') pane.append(linksSection(s, i));   // a label is a tag on a leader line: no room for a button
   pane.append(render3D(s, i));
   pane.append(section('Speaker notes', area(s, 'notes', 'Shown with N when presenting the exported file', { rows: 3 })));
+}
+
+/* Where a picture sits in its slide. One set of fields for every type that has
+   one; the engine turns them into --fig-h / --fig-w / --fig-al on the figure. */
+function figFields(s, defH, defFit) {
+  return [row(2, field('Image height', num(s, 'imageH', { step: 10, min: 40, max: 1200, ph: defH + ' px' })),
+    field('Aspect ratio', txt(s, 'imageRatio', '16/9 \u2014 instead of a height'))),
+  row(2, field('Image width %', num(s, 'imageW', { step: 5, min: 10, max: 100, ph: '100' })),
+    field('Fill', seg([['cover', 'Crop to fill'], ['contain', 'Whole image'], ['fill', 'Stretch']], s.fit || defFit,
+      v => { setOrDel(s, 'fit', v === defFit ? null : v); changed({ now: true }); }))),
+  field('Image aligns', seg([['', 'Full width'], ['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], s.imageAlign || '', v => { setOrDel(s, 'imageAlign', v || null); changed({ now: true }); })),
+  hint('Sizes are in pixels of the slide\u2019s own design size, so they scale with the slide. A ratio overrides the height and lets the width decide. Aligning does something once the width is under 100 %.')];
+}
+
+/* Buttons to other steps, drawn at the bottom of the slide. The target is kept
+   as the step’s id, not its number: moving or inserting steps then cannot
+   silently re-aim a button, and a link to a deleted step just stops being drawn. */
+const stepId = st => st.id || (st.id = 'p' + Math.random().toString(36).slice(2, 8));
+const stepOptions = skip => [['', '\u2014 step \u2014']].concat(ED.deck.steps.map((st, k) =>
+  k === skip ? null : [String(k), pad(k + 1) + '  ' + (st.title || (TYPES[st.type] || TYPES.card).label)]).filter(Boolean));
+const stepRefValue = o => String(DeckEngine.links.stepIndexOf(ED.deck.steps, o.to));
+const setStepRef = (o, v) => { const st = ED.deck.steps[+v]; setOrDel(o, 'to', st ? stepId(st) : null); changed({ now: true }); };
+function linksSection(s, i) {
+  const links = s.links || (s.links = []);
+  const rows = rowsEditor(links, (l, j, acts) => [
+    dropdown(stepOptions(i), stepRefValue(l), v => setStepRef(l, v)),
+    txt(l, 'label', 'Button text'), acts], () => ({ to: '', label: '' }), '+ Link', { cols: '1fr 1fr auto' });
+  const origSplice = links.splice.bind(links); links.splice = (...a) => { const r = origSplice(...a); changed({ now: true }); return r; };
+  return section('Links to other steps', rows,
+    hint('A button on the slide that jumps to another step. Leave the text blank to use that step\u2019s title. Works in the preview and in the exported file.'));
 }
 
 function tableEditor(s) {
@@ -703,10 +779,11 @@ function render3D(s, i) {
   return sec;
 }
 
-/* The deck's palette: one base colour per role, nine shades each, generated by
-   the same ramp the engine publishes as --color-<key>-100 … -900. Two slots say
-   which role paints surfaces and which paints accents; a step can borrow a
-   different role for its accent, and slide HTML can name any of them. */
+/* The deck's palette: one base colour per role, expanded by the same ramp the
+   engine publishes as --color-<key>-01 … -NN. The ramp runs near-white to
+   near-black through the base, which sits in the middle. Two slots say which
+   role paints surfaces and which paints accents; a step can borrow a different
+   role for its accent, and slide HTML can name any of them. */
 function renderPalette(pane) {
   const t = ED.deck.theme;
   const sec = section('Palette');
@@ -735,10 +812,14 @@ function renderPalette(pane) {
     const drawStrip = () => { strip.innerHTML = ''; strip.append(...swatches(r, t.dark)); };
     drawStrip();
     rows.append(h('div', { class: 'row role-row' },
-      h('input', { class: 'input', value: r.label || r.key, placeholder: 'name', title: 'Name of this colour. Slides address it as var(--color-' + r.key + '-700).',
+      h('input', { class: 'input', value: r.label || r.key, placeholder: 'name', title: 'Name of this colour. Slides address it as var(--color-' + r.key + '-04).',
         oninput: e => { r.label = e.target.value; }, onchange: () => { rekey(); changed({ now: true }); renderInspector(); } }),
       h('input', { type: 'color', value: (/^#[0-9a-f]{6}$/i.test(r.base) ? r.base : '#808080').toLowerCase(), title: 'Base colour',
         oninput: e => { r.base = e.target.value.toUpperCase(); drawStrip(); changed(); } }),
+      // How many shades this role publishes. Fewer means wider steps between them.
+      h('input', { class: 'input sh', type: 'number', min: THEME.minShades, max: THEME.maxShades, step: 1, value: r.shades,
+        title: 'Number of shades: --color-' + r.key + '-01 \u2026 -' + pad(r.shades) + '. Fewer shades step further apart.',
+        onchange: e => { r.shades = Math.max(THEME.minShades, Math.min(THEME.maxShades, Math.round(+e.target.value) || THEME.colourShades)); e.target.value = r.shades; drawStrip(); changed({ now: true }); } }),
       h('label', { class: 'check', title: r.key === t.surface ? 'The surface role always flips — that flip is what dark mode is.' : 'On: the ramp reads backwards on a dark deck, so -04 stays readable trim and -05 stays a slab. Off: the colour means the same hue in both themes.' },
         h('input', { type: 'checkbox', checked: r.invert, disabled: r.key === t.surface,
           onchange: e => { r.invert = e.target.checked; drawStrip(); changed({ now: true }); } }), 'flip'),
@@ -758,13 +839,16 @@ function renderPalette(pane) {
 
   sec.append(row(2,
     field('Surfaces use', dropdown(roleOptions(), t.surface, v => {
-      t.surface = v;
-      t.roles.forEach(r => { delete r.shades; delete r.invert; });
+      const was = t.surface; t.surface = v;
+      // Only the two roles swapping places go back to their slot's defaults; a
+      // count set by hand on any other role is the user's and stays.
+      t.roles.forEach(r => { if (r.key === v || r.key === was) { delete r.shades; delete r.invert; } });
       ED.deck.theme = THEME.themeOf(t);
       changed({ now: true }); renderInspector();
     })),
     field('Accents use', dropdown(roleOptions(), t.accent, v => { t.accent = v; changed({ now: true }); renderInspector(); }))));
-  sec.append(hint('<b>Surfaces</b> sets the page, panels, text and dividers — 11 shades, and it always flips. <b>Accents</b> sets kickers, rules, section backgrounds and highlights; every other role gets 5 shades around its base. Shades do the same job at the same position: <b>-04</b> is trim that reads against the page, <b>-05</b> a slab, <b>-01</b> what sits on that slab. A step can borrow a different role for its accent, and any colour is reachable straight from slide HTML: <code>&lt;b style="color:var(--color-' + t.accent + '-04)"&gt;</code>.'));
+  sec.append(hint('The number beside each colour is how many shades it publishes — <b>' + THEME.minShades + '–' + THEME.maxShades + '</b>, stepping wider apart the fewer you ask for. <code>--color-neutral-01…-11</code> and <code>--color-accent-01…-05</code> are written whatever the count, resampled from the ramp, so the stylesheets never run short.'));
+  sec.append(hint('<b>Surfaces</b> sets the page, panels, text and dividers — 11 shades by default, and it always flips. <b>Accents</b> sets kickers, rules, section backgrounds and highlights; every other role gets 5 shades around its base. Shades do the same job at the same position: <b>-04</b> is trim that reads against the page, <b>-05</b> a slab, <b>-01</b> what sits on that slab, and the middle shade is the hex you picked \u2014 the ramp runs near-white to near-black through it. A step can borrow a different role for its accent, and any colour is reachable straight from slide HTML: <code>&lt;b style="color:var(--color-' + t.accent + '-04)"&gt;</code>.'));
   pane.append(sec);
 }
 
@@ -991,7 +1075,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 
 function about() {
     dialog('Deck Builder', h('div', {
-      html: '<p>This GUI Helps you create a presentation around a 3D model. Built for engineers, the vision was to allow them for an easy showcase of their models.</p> <p class="stat-line"> Author: Rex Guil (Rex0014), with the help of Claude Code (Opus 5.5)</p> <p> Version: 1.1 - Released on the 25/10/2026 </p> <p><a href="https://github.com/Rex0014/MPK_Model-Presentation-Kit" target="_blank" rel="noopener">github.com/Rex0014/MPK_Model-Presentation-Kit</a></p> <p class="stat-line"> GPL 3.0 - Bundles Three.js (MIT) / Draco Decoder (Apache-2.0), Barlow (OFL) </p>'
+      html: '<p>This GUI Helps you create a presentation around a 3D model. Built for engineers, the vision was to allow them for an easy showcase of their models.</p> <p class="stat-line"> Author: Rex Guil (Rex0014), with the help of Claude Code (Opus 5.5)</p> <p> Version: 1.3.1- Released on the 07/11/2026 </p> <p><a href="https://github.com/Rex0014/MPK_Model-Presentation-Kit" target="_blank" rel="noopener">github.com/Rex0014/MPK_Model-Presentation-Kit</a></p> <p class="stat-line"> GPL 3.0 - Bundles Three.js (MIT) / Draco Decoder (Apache-2.0), Barlow (OFL) </p>'
     }), [{ label: 'Close', value: true, primary: true}]);
 }
 
@@ -1073,7 +1157,10 @@ async function boot() {
   ED.engine = new DeckEngine($('stage'), {
     config: ED.deck, assets: ED.assets, keys: false, dim: 0.14,
     onSlideClick: i => { if (!ED.presenting && i !== ED.sel) { ED.sel = i; renderList(); renderInspector(); } },
-    onModel: info => { ED.info = info; renderList(); if (ED.sel < 0 || document.activeElement === document.body || !$('insp').contains(document.activeElement)) renderInspector(); },
+    // The model's own panel is in here, so a load has to redraw it — but never
+    // while a field in it has the caret. Deck settings used to be exempt from
+    // that check, which is why naming a part there fought back.
+    onModel: info => { ED.info = info; renderList(); if (!$('insp').contains(document.activeElement)) renderInspector(); },
   }, onEngineState);
   ED.engine.start();
   window.editor = ED;
